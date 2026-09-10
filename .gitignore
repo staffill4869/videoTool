@@ -1,0 +1,50 @@
+# The directory Mix will write compiled artifacts to.
+/_build/
+
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Where 3rd-party dependencies like ExDoc output generated docs.
+/doc/
+
+# Ignore .fetch files in case you like to edit your project deps locally.
+/.fetch
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Temporary files, for example, from tests.
+/tmp/
+
+# Ignore package tarball (built via "mix hex.build").
+video_crm-*.tar
+
+# Ignore assets that are produced by build tools.
+/priv/static/assets/
+
+# Ignore digested assets cache.
+/priv/static/cache_manifest.json
+
+# In case you use Node.js/npm, you want to ignore these.
+npm-debug.log
+/assets/node_modules/
+
+
+# local server logs
+/server.log
+/server.err.log
+erl_crash.dump
+
+# OAuth 토큰 (DPAPI 암호문). 절대 커밋하지 않는다.
+/.credentials/
+# Flow 자동 조종용 Chrome 프로필 (로그인 세션 포함)
+/.chrome-profile/
+
+# 자격증명. .env.example 을 복사해서 쓴다.
+/.env

@@ -1,0 +1,10 @@
+{
+  "name": "videocrm-flow-driver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "이미 로그인된 Chrome 에 CDP 로 붙어 Flow 를 조종한다. 브라우저를 새로 받지 않으므로 playwright-core 만 쓴다.",
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

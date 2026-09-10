@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tidewave": {
+      "type": "http",
+      "url": "http://localhost:4300/tidewave/mcp"
+    },
+    "videocrm": {
+      "type": "http",
+      "url": "http://localhost:4300/mcp"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "_읽어주세요": [
+    "Flow 는 Google Labs 제품이라 UI 가 자주 바뀐다. 깨졌을 때 코드를 고치지 말고 이 파일만 고친다.",
+    "서버를 다시 띄울 필요 없다 — 호출할 때마다 다시 읽는다.",
+    "각 항목은 위에서부터 차례로 시도한다. 하나라도 맞으면 그걸 쓴다.",
+    "role: 접근성 역할로 찾기(권장, UI 변경에 가장 강하다). css: 선택자. text: 보이는 글자."
+  ],
+
+  "url": "https://labs.google/fx/ko/tools/flow",
+
+  "promptBox": [
+    { "role": "textbox" },
+    { "css": "textarea" },
+    { "css": "[contenteditable='true']" }
+  ],
+
+  "generateButton": [
+    { "role": "button", "name": "만들기|생성|Generate|Create" },
+    { "css": "button[type='submit']" }
+  ],
+
+  "resultItem": [
+    { "css": "[data-testid*='result'], [data-testid*='asset'], video, img[src*='blob']" }
+  ],
+
+  "downloadButton": [
+    { "role": "button", "name": "다운로드|Download|내보내기|Export" },
+    { "css": "button[aria-label*='ownload'], button[aria-label*='다운로드']" }
+  ],
+
+  "downloadAllMenuItem": [
+    { "role": "menuitem", "name": "프로젝트|모두|All|Project" },
+    { "text": "프로젝트 다운로드" }
+  ]
+}
