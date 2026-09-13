@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.AddLanguageAndVariants do
+defmodule VideoTool.Repo.Migrations.AddLanguageAndVariants do
   use Ecto.Migration
 
   def change do

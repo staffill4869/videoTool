@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.AllowPublicationWithoutRender do
+defmodule VideoTool.Repo.Migrations.AllowPublicationWithoutRender do
   use Ecto.Migration
 
   def change do

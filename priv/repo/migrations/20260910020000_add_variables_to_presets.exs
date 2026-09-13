@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.AddVariablesToPresets do
+defmodule VideoTool.Repo.Migrations.AddVariablesToPresets do
   use Ecto.Migration
 
   def change do

@@ -1,10 +1,10 @@
-# videoCRM MCP 연결
+# videoTool MCP 연결
 
-서버가 떠 있어야 한다. `C:\rebase\videoCRM\restart.ps1` 로 띄운다 (포트 4300).
+서버가 떠 있어야 한다. `C:\rebase\videoTool\restart.ps1` 로 띄운다 (포트 4300).
 
 | 엔드포인트 | 무엇 |
 |---|---|
-| `http://localhost:4300/mcp` | **videocrm** — 이 앱의 툴 20개 (next / save_scenes / ingest / publish …) |
+| `http://localhost:4300/mcp` | **videotool** — 이 앱의 툴 20개 (next / save_scenes / ingest / publish …) |
 | `http://localhost:4300/tidewave/mcp` | **tidewave** — 개발용 (SQL 조회 · 로그 · 코드 평가) |
 
 프로토콜은 MCP streamable HTTP (JSON-RPC 2.0). 지원 버전은 `2025-03-26` 이상.
@@ -13,17 +13,17 @@
 
 ## 1. Claude Code (권장)
 
-`C:\rebase\videoCRM` 에서 열기만 하면 된다. 폴더의 `.mcp.json` 을 읽고 승인 여부를 묻는다.
+`C:\rebase\videoTool` 에서 열기만 하면 된다. 폴더의 `.mcp.json` 을 읽고 승인 여부를 묻는다.
 
 ```powershell
-cd C:\rebase\videoCRM
+cd C:\rebase\videoTool
 claude
 ```
 
 다른 폴더에서도 쓰려면 사용자 범위로 등록한다.
 
 ```powershell
-claude mcp add --scope user --transport http videocrm http://localhost:4300/mcp
+claude mcp add --scope user --transport http videotool http://localhost:4300/mcp
 claude mcp add --scope user --transport http tidewave http://localhost:4300/tidewave/mcp
 ```
 
@@ -53,7 +53,7 @@ $body = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersio
 Invoke-RestMethod -Uri http://localhost:4300/mcp -Method Post -ContentType 'application/json' -Body $body
 ```
 
-`serverInfo.name` 이 `videoCRM` 이면 붙은 것이다.
+`serverInfo.name` 이 `videoTool` 이면 붙은 것이다.
 
 ## 자주 나오는 문제
 

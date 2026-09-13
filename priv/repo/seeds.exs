@@ -3,9 +3,9 @@
 # 프리셋 시드. 프롬프트 템플릿 본문은 자리표시자만 물려둔 뼈대다 —
 # 실제로 쓰던 A4 2~4장짜리 프롬프트로 교체할 것. 교체는 body 만 갈아끼우면 된다.
 
-alias VideoCRM.Repo
-alias VideoCRM.Presets.{StylePreset, DomainPreset, Voice, PromptTemplate}
-alias VideoCRM.Publishing.Channel
+alias VideoTool.Repo
+alias VideoTool.Presets.{StylePreset, DomainPreset, Voice, PromptTemplate}
+alias VideoTool.Publishing.Channel
 
 upsert = fn schema, key, attrs ->
   case Repo.get_by(schema, key) do
@@ -204,7 +204,7 @@ upsert.(Channel, [slug: "yt-main"], %{
   slug: "yt-main",
   platform: "youtube",
   display_name: "유튜브 메인 채널",
-  credential_ref: "videoCRM/youtube/yt-main",
+  credential_ref: "videoTool/youtube/yt-main",
   aspect_required: "any",
   max_duration_sec: 0,
   default_privacy: "private",
@@ -217,7 +217,7 @@ upsert.(Channel, [slug: "yt-shorts"], %{
   slug: "yt-shorts",
   platform: "youtube",
   display_name: "유튜브 쇼츠",
-  credential_ref: "videoCRM/youtube/yt-main",
+  credential_ref: "videoTool/youtube/yt-main",
   aspect_required: "9:16",
   max_duration_sec: 180,
   default_privacy: "private",
@@ -230,7 +230,7 @@ upsert.(Channel, [slug: "ig-main"], %{
   slug: "ig-main",
   platform: "instagram",
   display_name: "인스타그램 릴스",
-  credential_ref: "videoCRM/instagram/ig-main",
+  credential_ref: "videoTool/instagram/ig-main",
   aspect_required: "9:16",
   max_duration_sec: 900,
   default_privacy: "public",

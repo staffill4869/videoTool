@@ -1,4 +1,4 @@
-# videoCRM 서버 재시작.
+# videoTool 서버 재시작.
 #
 # 포트 4300 리스너 PID 만 죽인다. Get-Process erl | Stop-Process 를 절대 쓰지 말 것 —
 # 4000/4200 등 다른 프로젝트의 Phoenix 서버까지 같이 죽는다.

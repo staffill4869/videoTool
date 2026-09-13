@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.CreateMetrics do
+defmodule VideoTool.Repo.Migrations.CreateMetrics do
   use Ecto.Migration
 
   def change do

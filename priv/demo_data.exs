@@ -6,7 +6,7 @@
 #
 # 지워도 된다: Repo.delete(project) 하면 딸린 자산까지 같이 지워진다.
 
-alias VideoCRM.{Ingest, Projects}
+alias VideoTool.{Ingest, Projects}
 
 work = Path.join(System.tmp_dir!(), "vcrm_demo_#{System.os_time(:second)}")
 File.mkdir_p!(work)
@@ -139,5 +139,5 @@ IO.puts("""
 INFO 파일명은 z_01 / m_02 / a_03 순서인데 내용은 1 / 2 / 3 번이다.
 이름대로 붙었다면 순서가 뒤집혀 보일 것이고, 그림대로 붙었다면 맞게 보인다.
 
-지우려면:  VideoCRM.Repo.delete!(VideoCRM.Repo.get!(VideoCRM.Projects.Project, #{project.id}))
+지우려면:  VideoTool.Repo.delete!(VideoTool.Repo.get!(VideoTool.Projects.Project, #{project.id}))
 """)

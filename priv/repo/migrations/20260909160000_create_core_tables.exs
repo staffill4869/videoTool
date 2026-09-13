@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.CreateCoreTables do
+defmodule VideoTool.Repo.Migrations.CreateCoreTables do
   use Ecto.Migration
 
   def change do

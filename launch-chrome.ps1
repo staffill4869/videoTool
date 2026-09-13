@@ -1,4 +1,4 @@
-# Flow 자동화용 Chrome 을 띄운다.
+﻿# Flow 자동화용 Chrome 을 띄운다.
 #
 # 평소 쓰는 Chrome 을 그대로 쓰지 않고 전용 프로필을 쓰는 이유:
 #   - 기본 프로필로 Chrome 이 이미 떠 있으면 --remote-debugging-port 가 무시된다
@@ -8,7 +8,9 @@
 # 처음 한 번은 사람이 직접 구글 로그인을 해야 한다. 자동화는 로그인을 하지 않는다.
 
 $port    = 9222
-$profile = "C:\rebase\videoCRM\.chrome-profile"
+# 프로필 경로를 하드코딩하지 않는다. 폴더 이름이 바뀌면 없는 경로로 Chrome 이 떠서
+# 로그인 없는 새 프로필이 만들어진다 — 실제로 그렇게 프로필이 둘로 갈렸다.
+$profile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ".chrome-profile"
 $chrome  = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 $flowUrl = "https://labs.google/fx/ko/tools/flow"
 

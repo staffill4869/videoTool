@@ -1,9 +1,9 @@
-defmodule VideoCRM.MixProject do
+defmodule VideoTool.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :video_crm,
+      app: :video_tool,
       version: "0.1.0",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -20,7 +20,7 @@ defmodule VideoCRM.MixProject do
   # Type `mix help compile.app` for more information.
   def application do
     [
-      mod: {VideoCRM.Application, []},
+      mod: {VideoTool.Application, []},
       extra_applications: [:logger, :runtime_tools]
     ]
   end
@@ -90,10 +90,10 @@ defmodule VideoCRM.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind video_crm", "esbuild video_crm"],
+      "assets.build": ["compile", "tailwind video_tool", "esbuild video_tool"],
       "assets.deploy": [
-        "tailwind video_crm --minify",
-        "esbuild video_crm --minify",
+        "tailwind video_tool --minify",
+        "esbuild video_tool --minify",
         "phx.digest"
       ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]

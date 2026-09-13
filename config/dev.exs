@@ -1,11 +1,11 @@
 import Config
 
 # Configure your database
-config :video_crm, VideoCRM.Repo,
+config :video_tool, VideoTool.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "video_crm_dev",
+  database: "video_tool_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -16,7 +16,7 @@ config :video_crm, VideoCRM.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :video_crm, VideoCRMWeb.Endpoint,
+config :video_tool, VideoToolWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
@@ -25,8 +25,8 @@ config :video_crm, VideoCRMWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "09lmMFPVCXiJfwHSLHBAwtJDW04/7IjMMPHnzpZ1uPrSDE9I8PWwzPy+fLkARDCE",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:video_crm, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:video_crm, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:video_tool, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:video_tool, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -53,7 +53,7 @@ config :video_crm, VideoCRMWeb.Endpoint,
 # different ports.
 
 # Enable dev routes for dashboard and mailbox
-config :video_crm, dev_routes: true
+config :video_tool, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

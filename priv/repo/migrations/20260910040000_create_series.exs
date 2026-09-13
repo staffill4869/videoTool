@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.CreateSeries do
+defmodule VideoTool.Repo.Migrations.CreateSeries do
   use Ecto.Migration
 
   def change do

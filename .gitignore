@@ -48,3 +48,21 @@ erl_crash.dump
 
 # 자격증명. .env.example 을 복사해서 쓴다.
 /.env
+
+# 생성물. 여기에 영상·이미지·음성이 쌓인다 — 한 편에 수십 MB 라
+# 한 번 커밋되면 저장소에서 영구히 안 빠진다. 코드가 아니라 산출물이다.
+/projects/
+
+# Flow 조종용 Chrome 프로필. 로그인 세션이 들어 있다.
+/priv/flow_driver/chrome-profile/
+/priv/flow_driver/node_modules/
+
+# 서버 로그
+/server.log
+/server.err.log
+
+# 생성물 — 코드가 아니다. 옮길 필요도 없고 용량만 크다.
+/projects/
+/logs/
+/.agent.lock
+lines*.json

@@ -1,4 +1,4 @@
-defmodule VideoCRM.Repo.Migrations.AddPhashLastToAssets do
+defmodule VideoTool.Repo.Migrations.AddPhashLastToAssets do
   use Ecto.Migration
 
   def change do

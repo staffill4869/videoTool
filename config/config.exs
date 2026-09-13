@@ -7,20 +7,20 @@
 # General application configuration
 import Config
 
-config :video_crm,
-  namespace: VideoCRM,
-  ecto_repos: [VideoCRM.Repo],
+config :video_tool,
+  namespace: VideoTool,
+  ecto_repos: [VideoTool.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # Configure the endpoint
-config :video_crm, VideoCRMWeb.Endpoint,
+config :video_tool, VideoToolWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: VideoCRMWeb.ErrorHTML, json: VideoCRMWeb.ErrorJSON],
+    formats: [html: VideoToolWeb.ErrorHTML, json: VideoToolWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: VideoCRM.PubSub,
+  pubsub_server: VideoTool.PubSub,
   live_view: [signing_salt: "dyhYUKRm"]
 
 # Configure LiveView
@@ -35,12 +35,12 @@ config :phoenix_live_view,
 #
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
-config :video_crm, VideoCRM.Mailer, adapter: Swoosh.Adapters.Local
+config :video_tool, VideoTool.Mailer, adapter: Swoosh.Adapters.Local
 
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
-  video_crm: [
+  video_tool: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
@@ -50,7 +50,7 @@ config :esbuild,
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.3.0",
-  video_crm: [
+  video_tool: [
     args: ~w(
       --input=assets/css/app.css
       --output=priv/static/assets/css/app.css

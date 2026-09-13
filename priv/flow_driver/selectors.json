@@ -3,33 +3,217 @@
     "Flow 는 Google Labs 제품이라 UI 가 자주 바뀐다. 깨졌을 때 코드를 고치지 말고 이 파일만 고친다.",
     "서버를 다시 띄울 필요 없다 — 호출할 때마다 다시 읽는다.",
     "각 항목은 위에서부터 차례로 시도한다. 하나라도 맞으면 그걸 쓴다.",
-    "role: 접근성 역할로 찾기(권장, UI 변경에 가장 강하다). css: 선택자. text: 보이는 글자."
+    "role: 접근성 역할로 찾기(권장, UI 변경에 가장 강하다). css: 선택자. text: 보이는 글자.",
+    "2026-09-10 실측: 도메인이 labs.google/fx/... 에서 flow.google.com 으로 바뀌었다.",
+    "2026-09-10 실측: 프롬프트 상자는 textarea 가 아니라 contenteditable 이다.",
+    "  페이지의 textarea 는 reCAPTCHA 숨은 필드뿐이라 textarea 를 먼저 시도하면 엉뚱한 걸 잡는다."
   ],
-
-  "url": "https://labs.google/fx/ko/tools/flow",
-
+  "url": "https://flow.google.com/",
+  "_dismiss설명": "덮개만 넣는다. 여기에 'Get started' 를 넣었다가 dismissOverlays 가 새 프로젝트 버튼을 먼저 눌러버려서 정작 newProject 는 버튼을 못 찾았다 — 같은 이름을 두 목록에 넣지 말 것.",
+  "dismiss": [
+    {
+      "role": "button",
+      "name": "^동의함$"
+    },
+    {
+      "role": "button",
+      "name": "^Accept all$"
+    },
+    {
+      "role": "button",
+      "name": "^나중에$"
+    },
+    {
+      "role": "button",
+      "name": "^닫기$"
+    },
+    {
+      "role": "button",
+      "name": "배너 닫기"
+    }
+  ],
+  "newProjectButton": [
+    {
+      "role": "button",
+      "name": "^Get started$"
+    },
+    {
+      "role": "button",
+      "name": "^시작하기$"
+    },
+    {
+      "role": "button",
+      "name": "새 프로젝트|New project"
+    }
+  ],
   "promptBox": [
-    { "role": "textbox" },
-    { "css": "textarea" },
-    { "css": "[contenteditable='true']" }
+    {
+      "css": "[contenteditable='true']"
+    },
+    {
+      "css": "textarea:not([id^='g-recaptcha'])"
+    },
+    {
+      "role": "textbox"
+    }
   ],
-
+  "_generateButton설명": [
+    "2026-09-11 실측: 영상 단계에서 '생성 버튼을 찾지 못했습니다' 로 실패했다.",
+    "Flow 가 선택지를 내고 있을 때는 보내기 버튼의 라벨이 달라지거나 자리가 바뀐다.",
+    "후보를 넓게 둔다 — 못 찾으면 그 단계가 통째로 실패한다."
+  ],
   "generateButton": [
-    { "role": "button", "name": "만들기|생성|Generate|Create" },
-    { "css": "button[type='submit']" }
+    { "css": "button[aria-label='생성 시작']" },
+    { "css": "button[aria-label*='생성'], button[aria-label*='보내기'], button[aria-label*='전송']" },
+    { "css": "button[aria-label*='Send'], button[aria-label*='Generate'], button[aria-label*='Submit']" },
+    { "role": "button", "name": "^생성 시작$|^생성$|^보내기$|^전송$|^Generate$|^Send$" },
+    { "css": "button[type='submit']" },
+    { "css": "form button:not([disabled]):last-of-type" }
   ],
-
+  "_resultItem설명": "2026-09-11 실측: 결과 주소가 flow-content.google 에서 flow.google.com/asb/ 로 바뀌었다. 옛 호스트만 찾다가 이미지가 17장 있는데도 0건으로 셌다 — 호스트는 언제든 또 바뀐다.",
   "resultItem": [
-    { "css": "[data-testid*='result'], [data-testid*='asset'], video, img[src*='blob']" }
+    {
+      "css": "img[src*='/asb/'], video[src*='/asb/']"
+    },
+    {
+      "css": "img[src*='flow-content.google'], video[src*='flow-content.google']"
+    },
+    {
+      "css": "[data-testid*='result'], [data-testid*='asset'], video"
+    }
   ],
+  "_busy설명": "생성 중이면 보내기 화살표가 정지 버튼으로 바뀐다. 이게 있으면 아직 도는 중이다.",
+  "busy": [
+    {
+      "css": "button[aria-label*='중지'], button[aria-label*='정지'], button[aria-label*='Stop']"
+    }
+  ],
+  "_confirm설명": [
+    "새 Flow 는 대화형이라 프롬프트를 넣으면 바로 안 만들고 구성안을 낸 뒤 확인을 기다린다.",
+    "생성이 멈췄는데 결과가 모자라면 이 문장을 한 번 보내 진행시킨다."
+  ],
+  "confirmText": "네, 그대로 진행해 주세요.",
 
+  "_nudge설명": [
+    "2026-09-11 실측: 생성이 끝나면 Flow 가 '다음에 뭘 할까요? (1) 생성된 이미지로 영상 만들기 …' 를 묻는다.",
+    "거기에 confirmText('네, 그대로 진행해 주세요')를 던지면 1번을 고른 셈이 되어 시키지도 않은 영상이 만들어진다.",
+    "결과가 한 장이라도 나온 뒤에는 confirmText 대신 이 문장을 쓴다 — 모자란 것만 채우고 멈추라는 뜻이다.",
+    "{N} 자리에 모자란 개수가 들어간다."
+  ],
+  "nudgeText": "아직 {N}개가 모자랍니다. 모자란 것만 이어서 만들어 주세요. 영상으로 만들지 말고 이 단계에서 멈추세요.",
+
+  "_approve설명": [
+    "2026-09-11 실측: Flow 가 크레딧을 쓰기 전에 '승인 / 항상 승인 / 거부' 를 묻고 멈춘다.",
+    "'항상 승인' 을 누르면 그 프로젝트에서 다시 묻지 않는다 — 무인 운전에는 이쪽이어야 한다.",
+    "dismiss 와 분리해 둔다. dismiss 는 덮개 치우기고 이건 돈이 나가는 결정이라 성격이 다르다."
+  ],
+  "approveAlways": [
+    { "role": "button", "name": "^항상 승인$" },
+    { "role": "menuitem", "name": "^항상 승인$" },
+    { "role": "button", "name": "^Always allow$|^Always approve$" },
+    { "role": "menuitem", "name": "^Always allow$|^Always approve$" },
+    { "text": "^항상 승인$" }
+  ],
+  "approveOnce": [
+    { "role": "button", "name": "^승인$" },
+    { "role": "menuitem", "name": "^승인$" },
+    { "role": "button", "name": "^Approve$|^Allow$" },
+    { "role": "menuitem", "name": "^Approve$|^Allow$" },
+    { "text": "^승인$" }
+  ],
+  "_doneMarker설명": [
+    "2026-09-11 실측: 생성이 끝나면 '이미지 생성이 모두 완료되었습니다. 다음 작업을 위해 어떤 걸 도와드릴까요?' 가 뜨고",
+    "'생성된 이미지로 영상 만들기 / 특정 장면 수정하기 / 새로운 장면 추가하기' 선택지가 나온다.",
+    "이게 보이면 그 단계는 끝난 것이다. 여기에 답을 하면 첫 선택지를 고른 셈이 되어 시키지도 않은 영상이 만들어진다.",
+    "그래서 이 표시를 보면 아무 말도 하지 않고 빠져나온다."
+  ],
+  "_doneMarker주의": [
+    "2026-09-11: '무엇을 도와드릴까요' 를 넣었다가 새로 연 빈 프로젝트의 첫 인사말에 걸렸다.",
+    "이미지를 한 장도 안 만들고 '완료' 로 빠져나와 자산 0개로 끝났다.",
+    "완료를 단정하는 문구만 넣는다. 인사말·안내문은 절대 넣지 마라.",
+    "코드에서도 결과가 1개 이상 나온 뒤에만 이 표시를 인정한다 — 이중 안전장치다."
+  ],
+  "doneMarker": [
+    { "text": "이미지 생성이 모두 완료" },
+    { "text": "영상 생성이 모두 완료" },
+    { "text": "생성이 모두 완료되었" },
+    { "text": "모든 이미지가 생성되었" },
+    { "text": "모든 영상이 생성되었" }
+  ],
+  "_choiceOption설명": "Flow 가 내는 선택지 행. 무엇을 묻는지 읽고 원하는 것만 누르기 위해 쓴다.",
+  "choiceOption": [
+    { "css": "[role='radio'], [role='menuitemradio'], [role='option']" },
+    { "css": "li[role='button'], [data-testid*='suggestion'], [data-testid*='choice']" }
+  ],
+  "_stageChoice설명": [
+    "단계별로 '이 선택지가 뜨면 눌러라' 규칙. 비어 있으면 아무것도 누르지 않는다.",
+    "clean·info 는 비워 둔다 — 그 단계에서 누를 만한 선택지가 없다. 누르면 영상으로 새 나간다."
+  ],
+  "stageChoice": {
+    "clean": "",
+    "info": "",
+    "video": "이미지로 영상|영상 만들기|영상으로 만들기|make video|animate"
+  },
   "downloadButton": [
-    { "role": "button", "name": "다운로드|Download|내보내기|Export" },
-    { "css": "button[aria-label*='ownload'], button[aria-label*='다운로드']" }
+    {
+      "role": "button",
+      "name": "다운로드|Download|내보내기|Export"
+    },
+    {
+      "css": "button[aria-label*='ownload'], button[aria-label*='다운로드']"
+    }
   ],
-
   "downloadAllMenuItem": [
-    { "role": "menuitem", "name": "프로젝트|모두|All|Project" },
-    { "text": "프로젝트 다운로드" }
+    {
+      "role": "menuitem",
+      "name": "프로젝트|모두|All|Project"
+    },
+    {
+      "text": "프로젝트 다운로드"
+    }
+  ],
+  "_newProjectButton설명": "2026-09-11 실측: Flow 홈의 새 프로젝트 버튼은 'Get started' 다. 한국어 UI 에서도 영어다. 예전 후보였던 '새 프로젝트' 는 존재하지 않는다.",
+  "_guideline설명": [
+    "2026-09-11 실측: Flow 프로젝트에 '상시 지시' 를 박는 곳.",
+    "입력칸 옆 '설정 트리거'(article_spark) → '에이전트 요청 사항' 패널 → '안내 추가'.",
+    "여기 넣은 문장은 그 프로젝트의 모든 생성에 적용된다 — 화면비처럼 매번 지켜야 하는 것을 넣는다.",
+    "프롬프트 본문에 '9:16' 이라고 써도 에이전트가 무시하고 가로로 만들었다. 여기 넣어야 지켜진다."
+  ],
+  "guidelineTrigger": [
+    {
+      "css": "button[aria-label='에이전트 요청 사항']"
+    },
+    {
+      "role": "button",
+      "name": "에이전트 요청 사항"
+    },
+    {
+      "css": "[aria-label='설정 트리거']:not([hidden])"
+    }
+  ],
+  "guidelineAdd": [
+    {
+      "role": "button",
+      "name": "안내 추가"
+    }
+  ],
+  "guidelineTitle": [
+    {
+      "css": "input[placeholder*='제목'], input[aria-label*='제목']"
+    }
+  ],
+  "guidelineBody": [
+    {
+      "css": "textarea[placeholder*='가이드라인']"
+    },
+    {
+      "css": "[contenteditable='true'][aria-label*='가이드라인']"
+    }
+  ],
+  "guidelineDone": [
+    {
+      "role": "button",
+      "name": "^완료$"
+    }
   ]
 }

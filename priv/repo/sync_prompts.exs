@@ -6,10 +6,10 @@
 
 import Ecto.Query
 
-alias VideoCRM.Repo
-alias VideoCRM.Presets.{PromptTemplate, StylePreset, DomainPreset}
+alias VideoTool.Repo
+alias VideoTool.Presets.{PromptTemplate, StylePreset, DomainPreset}
 
-dir = Path.join(:code.priv_dir(:video_crm), "prompts")
+dir = Path.join(:code.priv_dir(:video_tool), "prompts")
 
 for stage <- ~w(clean info video) do
   path = Path.join(dir, "#{stage}.txt")
@@ -53,7 +53,7 @@ end
 # ── 그림체: 사용자가 실제로 쓰던 공통 기준 ──────────────────────
 
 clean_rules = """
-* {{project.aspect}} 가로형 영상
+* {{project.aspect}} 영상 ({{project.orientation}})
 * {{var.렌더링}}
 * 선명하고 직관적인 구조
 * 실제 구조와 원리를 이해하기 쉬운 시각화
@@ -75,6 +75,14 @@ variables = %{
   "빠른줌비율" => "약 3개 장면 중 1개 정도",
   "강조색" => "밝은 빨강, 전기 파랑, 시안, 노랑, 주황, 초록, 보라, 마젠타",
   "표기언어" => "한국어",
+  # 글자 모양과 그래픽 효과는 화면(/prompts)에서 고르는 값이다.
+  # Presets.variable_choices/0 에 선택지 문장이 있다 — 여기 기본값은 그중 하나여야
+  # 화면에서 열었을 때 '직접 입력한 값' 으로 뜨지 않는다.
+  "이미지글꼴" => "굵은 고딕체. 획 굵기가 일정하고 끝이 각져 있다. 제목용으로 크게 쓴다.",
+  "글자스타일" =>
+    "네온 사인처럼 발광하는 굵은 글자. 글자 자체가 빛을 내고 주변에 은은한 글로우가 번진다. 어두운 배경에서 가장 잘 보인다.",
+  "그래픽효과" =>
+    "발광, 네온 글로우, 밝은 외곽선, 반투명 컬러 면, 라이트 트레일, 스캔 효과, 에너지 라인, 깊이감 있는 그래픽 레이어를 적극적으로 사용하라.",
   "최종품질" =>
     "고품질 교육 다큐멘터리, 프리미엄 유튜브 인포그래픽 영상, 전문적인 건축·공학 설명 영상의 키프레임"
 }

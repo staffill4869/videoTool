@@ -4,7 +4,7 @@
   beginning of each filename, following the exact order of the script you have worked on
   so far. Keep the file order consistent with the script sequence.
 
-이 단계는 더 이상 필요 없다. videoCRM 의 ingest 가 파일명을 무시하고 화면 내용으로 순서를 맞춘다
+이 단계는 더 이상 필요 없다. videoTool 의 ingest 가 파일명을 무시하고 화면 내용으로 순서를 맞춘다
 (CLEAN 은 순서, INFO 는 CLEAN 과 phash 대조, 클립은 첫 프레임=CLEAN·끝 프레임=INFO 체인).
 Flow 파일명이 내용과 무관하다는 것이 애초에 이 기능을 만든 이유다.
 

@@ -1,2 +1,2 @@
 ExUnit.start()
-Ecto.Adapters.SQL.Sandbox.mode(VideoCRM.Repo, :manual)
+Ecto.Adapters.SQL.Sandbox.mode(VideoTool.Repo, :manual)

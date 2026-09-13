@@ -1,4 +1,4 @@
-# VideoCRM
+# VideoTool
 
 To start your Phoenix server:
 

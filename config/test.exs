@@ -5,23 +5,23 @@ import Config
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
-config :video_crm, VideoCRM.Repo,
+config :video_tool, VideoTool.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "video_crm_test#{System.get_env("MIX_TEST_PARTITION")}",
+  database: "video_tool_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
-config :video_crm, VideoCRMWeb.Endpoint,
+config :video_tool, VideoToolWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "i51rsbw7daTIdLoQawMmUZ4fEVqedTs2Lkh7/szpaCrwM8Skiz3PItsVtehzV3/d",
   server: false
 
 # In test we don't send emails
-config :video_crm, VideoCRM.Mailer, adapter: Swoosh.Adapters.Test
+config :video_tool, VideoTool.Mailer, adapter: Swoosh.Adapters.Test
 
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
@@ -41,10 +41,10 @@ config :phoenix,
   sort_verified_routes_query_params: true
 
 # 테스트가 사용자 클립보드를 덮어쓰지 않게 한다.
-config :video_crm, :clipboard, VideoCRM.Clipboard.Noop
+config :video_tool, :clipboard, VideoTool.Clipboard.Noop
 
 # 테스트가 실제 브라우저에 좌우되지 않게 한다.
-config :video_crm, :flow, VideoCRM.FlowStub
+config :video_tool, :flow, VideoTool.FlowStub
 
 # 테스트 도중에 프로젝트가 저절로 생기면 안 된다.
-config :video_crm, :series_runner, false
+config :video_tool, :series_runner, false
