@@ -821,8 +821,8 @@ defmodule VideoTool.MCP do
         project_id: result.project.id,
         language: result.project.language,
         scenes: result.scenes,
-        clean_reused: result.clean_reused,
-        next: "INFO 프롬프트부터 시작합니다. CLEAN 은 원본 것을 그대로 씁니다."
+        reused: result.reused,
+        next: result.note
       }
     else
       {:error, reason} -> %{ok: false, error: inspect_error(reason)}

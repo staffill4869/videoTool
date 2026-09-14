@@ -141,7 +141,7 @@ defmodule VideoToolWeb.ProjectLive.Show do
          |> put_flash(
            :info,
            "#{Projects.language_label(language)} 판을 만들었습니다. " <>
-             "CLEAN #{result.clean_reused}장은 원본과 공유합니다."
+             "화면은 원본 것을 그대로 씁니다 — Flow 를 돌리지 않습니다."
          )
          |> push_navigate(to: ~p"/projects/#{result.project.id}")}
 

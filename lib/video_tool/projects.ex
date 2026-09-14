@@ -614,9 +614,18 @@ defmodule VideoTool.Projects do
                variables: source.variables
              }) do
         copy_scenes(source, variant)
-        copied = copy_clean_assets(source, variant)
+        copy_clean_assets(source, variant)
+        reused = VideoTool.Media.asset_counts(variant.id)
 
-        {:ok, %{project: variant, scenes: length(scenes(variant.id)), clean_reused: copied}}
+        {:ok,
+         %{
+           project: variant,
+           scenes: length(scenes(variant.id)),
+           reused: reused,
+           note:
+             "화면은 원본 것을 그대로 씁니다 — Flow 를 돌리지 마세요. " <>
+               "대본을 옮기고, 그 언어 음성을 만들어 save_narration 한 뒤 assemble 하면 끝입니다."
+         }}
       end
     end
   end
@@ -641,6 +650,15 @@ defmodule VideoTool.Projects do
   end
 
   # 파일을 복사하지 않고 같은 경로를 가리킨다. 같은 그림이니 두 벌 둘 이유가 없다.
+  #
+  # **CLEAN 만이 아니라 INFO·클립까지 가져온다.** INFO 이미지에서 글자를 전부 뺀 뒤로
+  # 화면에는 언어가 없다 — 영상 안의 한국어는 자막과 음성뿐이고 둘 다 합성에서 얹는다.
+  # 그래서 언어판은 **Flow 를 한 번도 돌 필요가 없다.** 예전엔 CLEAN 만 가져와서
+  # INFO·VIDEO 를 다시 만들었는데, 그게 크레딧의 3분의 2다.
+  #
+  # 클립을 그대로 두고 자막·음성만 바꾸는 게 아니라 클립도 넘겨받는 이유: 영어 나레이션은
+  # 장면마다 길이가 달라서 앞을 자르는 지점이 달라진다. 완성본(master)을 재활용하면
+  # 한국어 길이로 잘린 화면이 그대로 남는다. 클립을 넘겨받아야 그 언어 길이로 다시 자른다.
   defp copy_clean_assets(source, variant) do
     scene_map = Map.new(scenes(variant.id), &{&1.scene_no, &1.id})
     source_scenes = Map.new(scenes(source.id), &{&1.id, &1.scene_no})
@@ -648,14 +666,16 @@ defmodule VideoTool.Projects do
 
     entries =
       from(a in VideoTool.Media.Asset,
-        where: a.project_id == ^source.id and a.kind == "clean" and not is_nil(a.scene_id)
+        where:
+          a.project_id == ^source.id and a.kind in ["clean", "info", "clip"] and
+            not is_nil(a.scene_id)
       )
       |> Repo.all()
       |> Enum.map(fn asset ->
         %{
           project_id: variant.id,
           scene_id: Map.get(scene_map, Map.get(source_scenes, asset.scene_id)),
-          kind: "clean",
+          kind: asset.kind,
           source: asset.source,
           file_path: asset.file_path,
           source_filename: asset.source_filename,

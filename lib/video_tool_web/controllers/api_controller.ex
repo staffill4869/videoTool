@@ -76,8 +76,8 @@ defmodule VideoToolWeb.ApiController do
         project_id: result.project.id,
         language: result.project.language,
         scenes: result.scenes,
-        clean_reused: result.clean_reused,
-        note: "CLEAN 이미지 #{result.clean_reused}장을 원본과 공유합니다. INFO 와 나레이션만 새로 만듭니다."
+        reused: result.reused,
+        note: result.note
       })
     end
   end
