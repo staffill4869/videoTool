@@ -379,11 +379,39 @@ defmodule VideoTool.Projects do
     end
   end
 
+  # Flow 클립은 **무조건 8초로 나온다.** 장면 target_sec 은 목표가 아니라 사실이다.
+  # 60초를 16장면으로 쪼개 각 3.85초로 적으면, 화면은 16×8=128초가 되어 대본의 두 배가 된다.
+  # 실제로 57번이 그랬다 — CLEAN·INFO·VIDEO 를 16개씩 48번 만들어 크레딧이 두 배 나갔고,
+  # 클립이 많아 VIDEO 단계가 900초 안에 못 끝내고 실패했다.
+  @clip_sec 8
+
+  defp check_scene_count(project, scene_maps) do
+    want = max(round(project.target_sec / @clip_sec), 1)
+    got = length(scene_maps)
+
+    if got > want * 1.5 do
+      {:error,
+       "장면이 #{got}개입니다. #{project.target_sec}초짜리면 #{want}개여야 합니다 — " <>
+         "Flow 클립은 길이를 지정할 수 없고 항상 #{@clip_sec}초로 나옵니다. " <>
+         "#{got}개를 만들면 화면이 #{got * @clip_sec}초가 되어 대본보다 길어지고, " <>
+         "생성도 #{got * 3}번 돌아 크레딧이 그만큼 더 나갑니다. " <>
+         "길이를 늘리려면 장면을 쪼개지 말고 시리즈의 target_sec 을 올리세요."}
+    else
+      :ok
+    end
+  end
+
   @doc """
   scene_no 기준 upsert. 기존 Scene 을 지우지 않으므로 이미 붙은 Asset 연결이 유지된다.
   대본 구간은 활성 Script 에 붙여 따로 갈아끼운다.
   """
   def save_scenes(project, scene_maps) when is_list(scene_maps) do
+    with :ok <- check_scene_count(project, scene_maps) do
+      do_save_scenes(project, scene_maps)
+    end
+  end
+
+  defp do_save_scenes(project, scene_maps) do
     script = active_script(project.id)
     existing = Map.new(scenes(project.id), &{&1.scene_no, &1})
 

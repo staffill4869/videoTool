@@ -226,10 +226,15 @@ defmodule VideoTool.Flow do
 
   @doc """
   결과가 `expect` 개 나올 때까지 기다린다.
-  Veo 는 분 단위로 걸리므로 기본 15분을 준다.
+
+  **기다리는 시간은 장 수에 비례한다.** 예전엔 몇 개를 기다리든 15분 고정이라,
+  8개는 대개 되는데 12~16개는 거의 항상 시간 초과로 실패했다 (실측: VIDEO 11번 중 6번 실패,
+  전부 "900초 안에 13개가 나오지 않았습니다" 꼴). 가장 비싼 단계가 다 만들어 놓고
+  회수 직전에 버려지는 것이라 손해가 크다. 장당 2분으로 잡고 최소 15분은 준다.
   """
   def wait_results(expect, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout_ms, 900_000)
+    default = max(expect, 1) * 120_000
+    timeout = Keyword.get(opts, :timeout_ms, max(default, 900_000))
     since = Keyword.get(opts, :since, 0)
     # 단계를 넘겨야 드라이버가 "이 단계에서 눌러도 되는 선택지" 를 구분한다.
     # 영상 단계에서만 '생성된 이미지로 영상 만들기' 를 누른다 — 이미지 단계에서 누르면 새 나간다.
