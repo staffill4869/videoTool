@@ -25,15 +25,36 @@ claude
 다른 폴더에서도 쓰려면 사용자 범위로 등록한다.
 
 ```powershell
-claude mcp add --scope user --transport http videotool http://localhost:4300/mcp
+claude mcp add --scope user --transport http videocrm http://localhost:4300/mcp
 claude mcp add --scope user --transport http tidewave http://localhost:4300/tidewave/mcp
-```
-
-확인:
-
-```powershell
 claude mcp list
 ```
+
+### 손으로 넣고 싶으면
+
+`claude mcp add` 가 쓰는 파일은 **`C:\Users\<사용자>\.claude.json`** 이다.
+맨 위(프로젝트별 구역 말고 최상위)의 `mcpServers` 에 이 두 줄을 넣는다.
+
+```json
+{
+  "mcpServers": {
+    "videocrm": {
+      "type": "http",
+      "url": "http://127.0.0.1:4300/mcp"
+    },
+    "tidewave": {
+      "type": "http",
+      "url": "http://127.0.0.1:4300/tidewave/mcp"
+    }
+  }
+}
+```
+
+**이름은 `videocrm` 으로 맞춘다.** 도구 이름이 `mcp__videocrm__flow_generate` 처럼 이름을
+앞에 달고 나오는데, 무인 루프의 허용 목록(`.claude/settings.local.json`)이 그 이름으로 적혀
+있어서 다르게 붙이면 목록에 없는 도구가 되어 전부 거부된다.
+
+넣고 나서 `claude` 를 다시 띄우면 붙는다. `claude mcp list` 로 확인한다.
 
 ## 2. Claude Desktop
 

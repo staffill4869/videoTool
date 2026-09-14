@@ -194,7 +194,14 @@ defmodule VideoTool.Jobs do
     {count, _} =
       Repo.update_all(
         from(j in GenerationJob, where: j.provider == "flow" and j.status == "running"),
-        set: [status: "failed", error: "서버가 재시작되어 중단됨", finished_at: now]
+        set: [
+          status: "failed",
+          # 지켜보던 Task 만 죽었을 뿐, **Flow 쪽 생성은 계속 돌아가서 결과가 남는다.**
+          # 여기서 "실패" 라고만 적으면 에이전트가 처음부터 다시 만든다 — 이미 만들어진 것을
+          # 또 만드느라 크레딧이 두 번 나간다. 무엇을 먼저 해 볼지 적어 준다.
+          error: "서버가 재시작되어 중단됨 — 다시 만들기 전에 flow_harvest 로 회수부터 해 보세요",
+          finished_at: now
+        ]
       )
 
     count
