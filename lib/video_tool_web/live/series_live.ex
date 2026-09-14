@@ -40,7 +40,8 @@ defmodule VideoToolWeb.SeriesLive do
     %{
       row: channel,
       usable: Publishing.token_usable?(channel),
-      conflicts: Publishing.channel_conflicts(channel),
+      # 같은 시리즈의 다른 쪽이 이미 연결됐으면 이 칸은 잠근다 — 둘 중 하나만 고른다.
+      locked_by: Publishing.sibling_connected(channel),
       account: Publishing.youtube_id(channel.account_id),
       account_title: channel.account_id |> String.split("|") |> List.last()
     }
@@ -311,8 +312,8 @@ defmodule VideoToolWeb.SeriesLive do
               </div>
             </div>
 
-            <%!-- 올라갈 곳. 한 시리즈에 채널·쇼츠 두 칸이고, 한 유튜브 채널은 한 칸에만 붙는다 —
-                  videos.insert 에 채널을 지정하는 항목이 없어 토큰이 곧 채널이기 때문이다. --%>
+            <%!-- 올라갈 곳. 영상이든 쇼츠든 **한 곳만** 고른다 — 둘 다 열어 두면 같은 편이
+                  두 번 올라가거나, 9:16 로 만든 걸 일반 영상 칸으로 올리게 된다. --%>
             <div class="mt-2 grid gap-2 sm:grid-cols-2">
               <.channel_block :for={c <- @channels[s.id] || []} c={c} oauth_ready={@oauth_ready} />
             </div>
@@ -401,16 +402,13 @@ defmodule VideoToolWeb.SeriesLive do
         {@c.account_title}
       </div>
 
-      <%!-- 같은 유튜브 채널을 두 칸이 물면 둘 다 같은 곳으로 올라간다. 이미 그런 행이
-            남아 있어서(네 칸이 한 채널) 새 연결만 막고 기존 것은 여기에 띄운다. --%>
-      <div :if={@c.conflicts != []} class="mt-1 text-xs text-warning">
-        ⚠ {Enum.map_join(@c.conflicts, ", ", & &1.display_name)} 과(와) 같은 채널입니다.
-        한쪽을 끊고 다른 채널로 다시 연결하세요.
+      <div :if={@c.locked_by} class="mt-1 text-xs opacity-60">
+        이 시리즈는 '{@c.locked_by.display_name}' 로 나갑니다. 둘 중 하나만 고릅니다.
       </div>
 
       <div class="mt-1 flex gap-1">
         <button
-          :if={not @c.usable and @oauth_ready}
+          :if={not @c.usable and @oauth_ready and is_nil(@c.locked_by)}
           phx-click="connect"
           phx-value-slug={@c.row.slug}
           class="btn btn-primary btn-xs"

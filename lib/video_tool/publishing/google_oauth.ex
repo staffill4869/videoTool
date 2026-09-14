@@ -77,7 +77,7 @@ defmodule VideoTool.Publishing.GoogleOAuth do
          {:ok, channel} <- Publishing.fetch_channel(channel_slug),
          {:ok, tokens} <- exchange(code),
          {:ok, updated} <- store(channel, tokens),
-         {:ok, updated} <- reject_duplicate(updated) do
+         {:ok, updated} <- reject_sibling(updated) do
       {:ok, updated}
     end
   end
@@ -143,26 +143,20 @@ defmodule VideoTool.Publishing.GoogleOAuth do
   end
 
   # 사람이 "구글로 로그인" 을 눌러 새로 붙일 때만 탄다.
-  #
-  # `videos.insert` 에는 채널을 지정하는 항목이 없다 — 토큰이 곧 채널이다. 그래서 두 칸이
-  # 같은 계정에 연결되면 "시리즈마다 다른 채널" 이 말만 그렇고 전부 한 곳으로 간다.
-  # 실제로 네 칸이 같은 채널을 물어 13편이 한 채널에 쌓였다.
-  defp reject_duplicate(channel) do
-    case Publishing.channel_conflicts(channel) do
-      [] ->
+  # 한 시리즈는 영상이든 쇼츠든 한 곳으로만 나간다 — 둘 다 열어 두면 같은 편이 두 번 올라간다.
+  defp reject_sibling(channel) do
+    case Publishing.sibling_connected(channel) do
+      nil ->
         {:ok, channel}
 
-      taken ->
-        title = channel.account_id |> String.split("|") |> List.last()
-
+      other ->
         # 연결을 되돌린다. 토큰을 남겨 두면 화면에는 "연결됨" 으로 보인다.
         Credentials.delete(channel.credential_ref)
         Publishing.update_channel(channel, %{token_expires_at: nil, account_id: ""})
 
         {:error,
-         "'#{title}' 은(는) 이미 #{Enum.map_join(taken, ", ", & &1.display_name)} 에 " <>
-           "연결돼 있습니다. 한 유튜브 채널은 한 칸에만 연결할 수 있습니다 — " <>
-           "칸마다 다른 채널을 고르거나, 먼저 저쪽 연결을 끊으세요."}
+         "이 시리즈는 이미 '#{other.display_name}' 로 나갑니다. " <>
+           "영상과 쇼츠 중 한 곳만 고를 수 있습니다 — 바꾸려면 먼저 저쪽 연결을 끊으세요."}
     end
   end
 
@@ -252,7 +246,9 @@ defmodule VideoTool.Publishing.GoogleOAuth do
 
   def disconnect(channel) do
     Credentials.delete(channel.credential_ref)
-    Publishing.update_channel(channel, %{token_expires_at: nil})
+    # account_id 도 같이 비운다. 토큰만 지우고 "어느 채널이었는지" 를 남겨 두면
+    # 끊긴 칸이 계속 그 채널을 차지해서, 다른 칸에 붙이려 할 때 중복이라고 거절당한다.
+    Publishing.update_channel(channel, %{token_expires_at: nil, account_id: ""})
   end
 
   defp describe(%{"error_description" => message}), do: message

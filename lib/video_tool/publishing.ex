@@ -203,19 +203,19 @@ defmodule VideoTool.Publishing do
   end
 
   @doc """
-  같은 유튜브 채널을 가리키는 다른 칸이 있는가.
+  이 시리즈에서 **다른 쪽**이 이미 연결돼 있으면 그 칸. 없으면 nil.
 
-  `videos.insert` 에는 채널을 지정하는 항목이 없다 — **토큰이 곧 채널이다.**
-  그래서 두 칸이 같은 계정에 연결되면 "시리즈마다 다른 채널" 이 말만 그렇고 실제로는
-  한 곳으로 간다. 실제로 네 칸이 전부 같은 채널을 물어 13편이 한 채널에 쌓였다.
+  한 시리즈는 영상이든 쇼츠든 **한 곳으로만** 나간다. 둘 다 열어 두면 같은 편이 두 번
+  올라가거나, 9:16 로 만든 걸 일반 영상 칸으로 올려 화면이 레터박스로 남는다.
+  그래서 한쪽을 연결하면 다른 쪽은 잠근다 — 바꾸려면 먼저 끊는다.
+
+  끊어 놓고 `account_id` 만 남은 행은 세지 않는다. 토큰이 실제로 있는 칸만 자리를 차지한다.
   """
-  def channel_conflicts(%Channel{account_id: id}) when id in [nil, ""], do: []
+  def sibling_connected(%Channel{series_id: nil}), do: nil
 
-  def channel_conflicts(%Channel{} = channel) do
-    account = youtube_id(channel.account_id)
-
-    Repo.all(from c in Channel, where: c.id != ^channel.id and c.account_id != "")
-    |> Enum.filter(&(youtube_id(&1.account_id) == account))
+  def sibling_connected(%Channel{} = channel) do
+    Repo.all(from c in Channel, where: c.series_id == ^channel.series_id and c.id != ^channel.id)
+    |> Enum.find(&VideoTool.Credentials.exists?(&1.credential_ref))
   end
 
   @doc "`\"UCxxxx|제목\"` 에서 채널 id 만. 제목은 사람이 바꿀 수 있어 비교 기준이 못 된다."

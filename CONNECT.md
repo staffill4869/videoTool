@@ -1,6 +1,8 @@
 # videoTool MCP 연결
 
-서버가 떠 있어야 한다. `C:\rebase\videoTool\restart.ps1` 로 띄운다 (포트 4300).
+서버가 떠 있어야 한다. `C:\rebase\videoCRM\restart.ps1` 로 띄운다 (포트 4300).
+
+> 폴더 이름은 **videoCRM** 이다. `C:\rebase\videoTool` 은 빈 껍데기라 거기서 열면 아무것도 안 붙는다.
 
 | 엔드포인트 | 무엇 |
 |---|---|
@@ -13,10 +15,10 @@
 
 ## 1. Claude Code (권장)
 
-`C:\rebase\videoTool` 에서 열기만 하면 된다. 폴더의 `.mcp.json` 을 읽고 승인 여부를 묻는다.
+`C:\rebase\videoCRM` 에서 열기만 하면 된다. 폴더의 `.mcp.json` 을 읽고 승인 여부를 묻는다.
 
 ```powershell
-cd C:\rebase\videoTool
+cd C:\rebase\videoCRM
 claude
 ```
 
