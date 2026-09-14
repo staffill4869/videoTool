@@ -145,6 +145,20 @@ defmodule VideoTool.Work do
     end
   end
 
+  # 자막은 이 글이 그대로 구워진다 — 완성본에서 고치려면 전부 다시 합성해야 한다.
+  # 실제로 나간 것들: "그 곡물은 어디서 오나." (물음표 없음), "같은 많이 먹었다는 말이"
+  # (따옴표가 빠져 비문), "살아 남는" (한 단어인데 띄웠다).
+  @proofread """
+
+  **저장하기 전에 오타를 한 번 훑으세요.** 이 글이 자막으로 그대로 구워집니다.
+  - 맞춤법·띄어쓰기: 한 단어는 붙입니다 (살아남다 · 빠져나가다 · 쌓아두다)
+  - 의문문은 반드시 ? 로 끝냅니다. 문장 끝 마침표·물음표·느낌표로 자막을 나누므로,
+    빠지면 두 문장이 한 줄로 붙습니다
+  - 낱말을 인용할 때는 따옴표를 넣습니다 (같은 "많이 먹었다"는 말이)
+  - 두 뜻으로 읽히는 낱말은 바꿉니다 (흡수 이야기의 "태워 주다" → "실어 나르다")
+  - 소리 내어 읽어 걸리는 곳은 TTS 도 걸립니다
+  """
+
   # 마지막 장면을 요약으로 닫으면 사람들이 "그렇구나" 하고 나간다.
   # 질문으로 끝내면 댓글에 자기 경험과 판단을 쓴다 — 그게 노출로 돌아온다.
   defp instruction("write_script"),
@@ -167,14 +181,14 @@ defmodule VideoTool.Work do
         "- 마지막 장면도 8초짜리다. 짧은 마무리 한 마디 + 질문으로 38~42자를 채울 것
 " <>
         "  예) \"직선은 시간을 아끼려는 계산이었습니다. 지금 우리가 쓰는 길은 " <>
-        "무엇을 아끼려고 그렇게 놓였을까요?\""
+        "무엇을 아끼려고 그렇게 놓였을까요?\"" <> @proofread
 
   defp instruction("split_scenes"),
     do:
       "대본을 장면으로 나눠 save_scenes(project_id, scenes) 로 저장하세요. " <>
         "장면 8개, 각 target_sec 은 8입니다 — Flow 클립이 8초로 나옵니다. " <>
         "shot_prompt · info_instruction · camera_plan · expected_labels 를 채우세요. " <>
-        "마지막 장면(purpose: close)의 segment_text 는 질문으로 끝나야 합니다."
+        "마지막 장면(purpose: close)의 segment_text 는 질문으로 끝나야 합니다." <> @proofread
 
   defp instruction("translate_script"),
     do:
@@ -198,7 +212,7 @@ defmodule VideoTool.Work do
         "길이를 맞췄으면 힉스필드 MCP 로 TTS 를 만들고 그 파일 경로나 URL 을 " <>
         "save_narration(project_id, file) 에 넘기세요. " <>
         "낭독 속도를 올려 길이를 맞추지 마세요 — 글자 수로 맞춥니다. " <>
-        "저장이 끝나면 서버가 합성까지 이어서 합니다."
+        "저장이 끝나면 서버가 합성까지 이어서 합니다." <> @proofread
 
   defp instruction("write_allowed_facts"),
     do:

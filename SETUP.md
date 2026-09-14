@@ -115,8 +115,14 @@ mix run priv/repo/seed_channels.exs    # 시리즈별 채널 행 + 시리즈↔�
 
 ## 7. 무인 루프 켜기
 
-`.claude/settings.local.json` 의 `permissions.allow` 가 이미 들어 있다.
-비대화형에서는 승인창을 띄울 수 없어서, 목록에 없는 도구는 그냥 거부된다.
+비대화형에서는 승인창을 띄울 수 없어서, **허용 목록에 없는 도구는 그냥 거부된다.**
+루프가 대본만 쌓고 아무것도 안 하면 십중팔구 여기다.
+
+`settings.local.json` 은 git 이 무시하므로 저장소에는 본보기만 있다. 복사해서 쓴다:
+
+```powershell
+Copy-Item .claude\settings.example.json .claude\settings.local.json
+```
 
 ```powershell
 # 한 번 돌려보기 (에이전트는 안 깨우고 상황만 본다)

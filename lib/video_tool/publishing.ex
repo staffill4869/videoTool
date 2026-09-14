@@ -234,15 +234,21 @@ defmodule VideoTool.Publishing do
     end
   end
 
-  # 만료 컬럼만 보고 막으면 refresh_token 이 멀쩡한데도 사람을 부르게 된다.
-  # access_token/1 이 만료 시 알아서 갱신하므로 갱신까지 시켜 보고 판정한다.
+  @doc """
+  이 채널로 지금 올릴 수 있는가.
+
+  만료 컬럼(`token_valid?`)만 보면 안 된다 — access_token 은 한 시간짜리라 대부분의 시간
+  "만료" 로 보이는데, refresh_token 이 살아 있으면 올릴 수 있다. 실제로 무인 루프가
+  목록의 `token_valid: false` 만 보고 멀쩡한 채널의 업로드를 통째로 건너뛴 적이 있다.
+  그래서 **화면·도구 목록도 전부 이 함수로 판정한다.**
+  """
   # (refresh_token 이 없거나 폐기됐으면 여기서 여전히 걸린다 — 그때는 진짜 reauth 가 필요하다)
-  defp token_usable?(%Channel{platform: "youtube"} = channel) do
+  def token_usable?(%Channel{platform: "youtube"} = channel) do
     Channel.token_valid?(channel) or
       match?({:ok, _}, VideoTool.Publishing.GoogleOAuth.access_token(channel))
   end
 
-  defp token_usable?(channel), do: Channel.token_valid?(channel)
+  def token_usable?(channel), do: Channel.token_valid?(channel)
 
   # 채널이 private 이면 무조건 private 이다. 무인 루프가 실수로 public 을 넣어도
   # 공개로 나가지 않게 **코드에서** 막는다 — 프롬프트 지시만으로는 막을 수 없다.

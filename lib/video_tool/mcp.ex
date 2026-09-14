@@ -161,6 +161,23 @@ defmodule VideoTool.MCP do
         ["project_id", "file"]
       ),
       tool(
+        "thumbnail_brief",
+        "이 편의 섬네일을 어떻게 그릴지 지시문을 내준다. 그림 생성 전에 부르세요. " <>
+          "영양제 시리즈는 먹기 전/후 좌우 비교, 나머지는 한 장면. " <>
+          "제목은 2~5글자로 구석에 넣고 프로젝트 이름은 넣지 않습니다",
+        %{"project_id" => int("프로젝트 id")},
+        ["project_id"]
+      ),
+      tool(
+        "save_thumbnail",
+        "만든 섬네일을 완성본에 붙인다. 발행할 때 이 파일이 유튜브 섬네일로 올라간다",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "file" => str("이미지 경로 또는 http(s) URL")
+        },
+        ["project_id", "file"]
+      ),
+      tool(
         "assemble",
         "클립을 장면 순서로 리타이밍해 이어 붙이고 나레이션과 자막을 얹어 완성본을 만든다",
         %{
@@ -619,7 +636,7 @@ defmodule VideoTool.MCP do
   defp handle("list_channels", _args) do
     channels =
       Enum.map(Publishing.list_channels(), fn c ->
-        valid = Publishing.Channel.token_valid?(c)
+        valid = Publishing.token_usable?(c)
 
         %{
           slug: c.slug,
@@ -916,7 +933,7 @@ defmodule VideoTool.MCP do
           slug: c.slug,
           platform: c.platform,
           display_name: c.display_name,
-          connected: Publishing.Channel.token_valid?(c),
+          connected: Publishing.token_usable?(c),
           token_saved: VideoTool.Credentials.exists?(c.credential_ref),
           token_expires_at: c.token_expires_at,
           aspect_required: c.aspect_required
@@ -1053,6 +1070,29 @@ defmodule VideoTool.MCP do
         else
           {:error, reason} -> %{ok: false, error: inspect_error(reason)}
         end
+    end
+  end
+
+  defp handle("thumbnail_brief", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]) do
+      %{ok: true, project_id: project.id, brief: VideoTool.Thumbnail.brief(project)}
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle("save_thumbnail", args) do
+    src = args["file"] || args["url"]
+
+    if is_nil(src) or src == "" do
+      %{ok: false, error: "file 에 이미지 경로나 URL 을 주세요."}
+    else
+      with {:ok, project} <- Projects.get_project(args["project_id"]),
+           {:ok, result} <- VideoTool.Thumbnail.save(project, src) do
+        Map.put(result, :ok, true)
+      else
+        {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+      end
     end
   end
 

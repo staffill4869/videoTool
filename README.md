@@ -83,10 +83,52 @@ mix run priv/repo/sync_prompts.exs   # priv/prompts/*.txt → DB
 4. flow_generate(info)   도해를 얹은 그림 8장                3분
 5. flow_generate(video)  CLEAN→INFO 보간 클립 8개           15분
 6. 힉스필드 TTS          장면별 음성 → work/tts/sNN.mp3
-7. finish-video.ps1      정렬 · 자막 · 합성 → final.mp4
+7. assemble              정렬 · 자막 · 합성 → final.mp4
+8. thumbnail_brief       섬네일 지시문 → 그림 → save_thumbnail
+9. save_publish_meta     제목·설명 → publish (비공개)
 ```
 
 3번을 건너뛰지 말 것. 아래 "함정" 참고.
+
+---
+
+## 이게 어떻게 굴러가나
+
+**서버는 스스로 밀지 않는다.** `auto_advance` 는 꺼져 있고, 서버가 하는 일은
+`next_job` 으로 "다음에 할 일" 을 내주는 것뿐이다. 그걸 집어서 위 9단계를 끝까지 미는 건
+**에이전트**다. 그래서 누가 모느냐에 따라 실행 방법이 셋이다.
+
+| 모는 쪽 | 어떻게 | 쓰는 때 |
+|---|---|---|
+| 사람이 붙은 Claude Code | 터미널에서 그냥 시킨다 | 새 시리즈 설계, 문제 파고들기 |
+| Windows 예약 작업 | `run-agent.ps1` — `claude -p` 를 깨운다 | 이 PC 를 계속 켜 둘 때 |
+| 코워크 예약 | [COWORK.md](COWORK.md) 의 프롬프트를 `/schedule` 에 붙인다 | 지금 쓰는 방식 |
+
+**셋을 동시에 켜지 마라.** Flow 를 조종하는 Chrome 이 하나뿐이라 서로 창을 뺏는다.
+한 회차가 하는 일은 다 같다 — 미완료 프로젝트를 하나 골라 끝까지 밀고, 끝나면 다음 편으로
+넘어간다. 미완료가 바닥나면 활성 시리즈에서 새 편을 만든다.
+
+### 지금 돌고 있는지 보기
+
+```
+http://localhost:4300/agent
+```
+
+신호등 셋(지금 돌고 있나 · 예약 상태 · Chrome 연결)과 프로젝트마다
+`장면8 · CLEAN8 · INFO8 · VIDEO0` 막대, "지금 무엇을 기다리는지" 한 줄.
+
+**누가 몰든 잡힌다.** 잠금 파일로 판정하면 그 파일을 만드는 `run-agent.ps1` 만 보이고
+코워크가 한창 일하는 중에도 "조용함" 으로 뜬다. 그래서 **들어온 MCP 호출 자체**를 기록한다 —
+호출은 누가 불렀든 서버를 지나간다. 조회용 도구(`list_projects` 등)는 활동으로 세지 않는다.
+→ `lib/video_tool/activity.ex`
+
+### 루프가 조용히 서는 자리
+
+| 증상 | 원인 | 확인 |
+|---|---|---|
+| 영상 단계에서 멈춤 | Chrome 이 죽었거나 구글 로그인이 풀림 | `/agent` 의 Chrome 신호등, `flow_status` |
+| 대본만 쌓이고 안 나감 | 에이전트가 권한에 막힘 | `.claude/settings.local.json` 의 `allow` |
+| 업로드만 건너뜀 | 채널 토큰 | `list_channels` — 아래 "발행" 참고 |
 
 ---
 
@@ -143,11 +185,35 @@ mix run priv/repo/sync_prompts.exs   # priv/prompts/*.txt → DB
 
 ## 발행
 
-**자동으로 나가지 않는다.** `publish` 는 `confirm: true` 없이는 실행되지 않고,
-에이전트 권한 파일에서도 거부 목록에 있다. 되돌릴 수 없는 공개 행위라 사람이 누를 때만 나간다.
+무인 루프가 **비공개(private)로 자동 업로드한다.** 검수하고 유튜브 스튜디오에서 공개로 바꾼다.
 
-토큰은 DB 가 아니라 Windows DPAPI 로 암호화해 `.credentials/` 에 둔다.
-OAuth 동의 화면이 "테스트" 상태면 refresh token 이 **7일** 만에 만료된다 — 프로덕션으로 게시할 것.
+공개로 나가는 것은 **코드가 막는다.** 채널의 `default_privacy` 가 `private` 이면
+`publish` 에 `privacy: "public"` 을 넣어도 무시된다 — 프롬프트 지시만으로는 못 막는다.
+공개로 바꾸려면 사람이 채널 설정을 먼저 바꿔야 한다. → `publishing.ex` 의 `resolve_privacy/2`
+
+시리즈마다 올라가는 채널이 다르다. `videos.insert` 에는 채널을 지정하는 항목이 없어서
+**토큰이 곧 채널**이다 — 채널을 나누려면 `channels` 행을 나누고 행마다 따로 로그인한다.
+
+토큰은 DB 가 아니라 Windows DPAPI 로 암호화해 `.credentials/` 에 둔다. 그래서 다른 PC 로
+복사해도 풀리지 않는다. OAuth 동의 화면이 "테스트" 상태면 refresh token 이 **7일** 만에
+만료된다 — 프로덕션으로 게시할 것.
+
+**`token_valid` 가 false 라고 끊긴 게 아니다.** access token 은 한 시간짜리라 대부분의 시간
+만료로 보인다. refresh token 이 살아 있으면 올라간다 — 그래서 목록도 발행도 전부
+`Publishing.token_usable?/1` 하나로 판정한다(갱신까지 시켜 보고 답한다).
+예전에 목록만 만료 컬럼을 보다가, 무인 루프가 멀쩡한 채널의 업로드를 통째로 건너뛴 적이 있다.
+
+## 섬네일
+
+서버는 그림을 못 만든다. `thumbnail_brief(project_id)` 가 **무엇을 그릴지 글로 내주고**,
+에이전트가 그려서 `save_thumbnail` 로 넘기면 발행할 때 같이 올라간다.
+
+- 영양제 시리즈 — 화면을 좌우로 갈라 **먹기 전 / 먹은 후**. 같은 대상·같은 각도, 그 한 가지만 다르게
+- 나머지 — 영상에서 가장 궁금한 순간 한 장면
+- 공통 — 제목은 **2~5글자**로 네 귀퉁이 중 한 곳. 시리즈 이름·회차 번호는 넣지 않는다
+  (관리용 제목이 그대로 박힌 편이 있었다)
+
+→ `lib/video_tool/thumbnail.ex`
 
 ---
 
@@ -162,7 +228,10 @@ lib/video_tool/
   mapping.ex     dHash/pHash 로 결과를 장면에 배정
   sheet.ex       콘택트 시트 — 배정을 눈으로 확인하는 용도
   assembly.ex    나레이션 정렬 · 리타이밍 · 합성 · 자막
+  thumbnail.ex   섬네일 지시문 · 완성본에 붙이기
   publishing.ex  유튜브 · 인스타
+  activity.ex    누가 서버를 몰고 있나 (무인 루프 감시)
+  agent_status.ex  /agent 화면이 읽는 것
 priv/
   prompts/       clean.txt · info.txt · video.txt (파일이 원본, DB 는 사본)
   flow_driver/   Playwright 로 Chrome 을 조종하는 Node 스크립트
