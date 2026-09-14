@@ -151,6 +151,20 @@ defmodule VideoTool.Media do
   alias VideoTool.Repo
   alias VideoTool.Media.{Asset, Narration, Subtitle, Render}
 
+  @doc """
+  이 단계 자산을 통째로 지운다. 다른 편의 결과를 긁어왔을 때 쓴다.
+
+  파일은 `incoming` 에 남긴다 — 눈으로 확인할 일이 남아 있고, 지워 봐야 되돌릴 수 없다.
+  """
+  def drop_assets(project_id, kind) do
+    {n, _} =
+      Repo.delete_all(
+        from a in Asset, where: a.project_id == ^project_id and a.kind == ^kind
+      )
+
+    {:ok, n}
+  end
+
   def list_assets(project_id, kind) do
     Repo.all(
       from a in Asset,

@@ -255,6 +255,47 @@ defmodule VideoTool.Flow do
   클립은 첫 프레임이 CLEAN 과 끝 프레임이 INFO 와 닮았는지로 (by_chain).
   """
   def harvest(project, stage, exclude) do
+    with :ok <- right_tab?(project) do
+      do_harvest(project, stage, exclude)
+    end
+  end
+
+  # **어느 Flow 프로젝트를 보고 있는지 먼저 확인한다.**
+  # 화면에 뜬 것을 그냥 긁으면 남의 편을 우리 것으로 등록한다 — 실측: 56번의 INFO 를
+  # 회수하는 사이 탭이 57번으로 옮겨가 있어서, 57번 CLEAN 16장이 56번 info 자산으로
+  # 들어갔고 그중 8장이 장면에까지 배정됐다. known 목록으로는 못 막는다.
+  # 그쪽으로 옮겨 가지는 않는다 — 다른 편이 한창 생성 중일 수 있어서 창을 뺏으면 안 된다.
+  defp right_tab?(project) do
+    case {saved_url(project), status()} do
+      # 이 프로젝트의 Flow 주소를 아직 모르면 비교할 기준이 없다. 예전처럼 진행한다.
+      {nil, _} ->
+        :ok
+
+      {saved, {:ok, st}} ->
+        if flow_id(saved) == flow_id(st[:url]) do
+          :ok
+        else
+          {:error,
+           "지금 열려 있는 Flow 프로젝트가 이 편의 것이 아닙니다. " <>
+             "다른 편의 결과를 긁어올 수 있어 중단했습니다 — " <>
+             "flow_new_project(#{project.id}) 로 이 편의 창을 연 뒤 다시 회수하세요."}
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp flow_id(url) when is_binary(url) do
+    case Regex.run(~r{/project/([0-9a-f-]+)}, url) do
+      [_, id] -> id
+      _ -> url
+    end
+  end
+
+  defp flow_id(_), do: nil
+
+  defp do_harvest(project, stage, exclude) do
     kind = asset_kind(stage)
     dir = Path.join(project.work_dir, "incoming")
     # 이미 등록한 것 + **생성 전에 화면에 있던 것**. 뒤엣것을 빼지 않으면

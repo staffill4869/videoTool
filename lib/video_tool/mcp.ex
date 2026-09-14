@@ -161,6 +161,17 @@ defmodule VideoTool.MCP do
         ["project_id", "file"]
       ),
       tool(
+        "drop_assets",
+        "잘못 들어온 자산을 그 단계째 지운다. 다른 편의 결과를 긁어왔을 때 쓴다. " <>
+          "confirm 이 true 가 아니면 몇 건인지만 알려주고 지우지 않는다",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "kind" => str("clean | info | clip"),
+          "confirm" => %{"type" => "boolean", "description" => "실제로 지울 때만 true"}
+        },
+        ["project_id", "kind"]
+      ),
+      tool(
         "thumbnail_brief",
         "이 편의 섬네일을 어떻게 그릴지 지시문을 내준다. 그림 생성 전에 부르세요. " <>
           "영양제 시리즈는 먹기 전/후 좌우 비교, 나머지는 한 장면. " <>
@@ -1083,6 +1094,30 @@ defmodule VideoTool.MCP do
         else
           {:error, reason} -> %{ok: false, error: inspect_error(reason)}
         end
+    end
+  end
+
+  defp handle("drop_assets", args) do
+    kind = args["kind"]
+
+    with {:ok, project} <- Projects.get_project(args["project_id"]),
+         true <- kind in ~w(clean info clip) or {:error, "kind 는 clean · info · clip 중 하나입니다"} do
+      assets = Media.list_assets(project.id, kind)
+
+      if args["confirm"] == true do
+        {:ok, n} = Media.drop_assets(project.id, kind)
+        %{ok: true, deleted: n, kind: kind, note: "파일은 incoming 에 남습니다"}
+      else
+        %{
+          ok: true,
+          deleted: 0,
+          would_delete: length(assets),
+          kind: kind,
+          note: "confirm: true 를 넣어야 지웁니다"
+        }
+      end
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
     end
   end
 
