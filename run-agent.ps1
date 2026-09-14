@@ -63,10 +63,39 @@ try {
   exit 1
 }
 
-$pending = [int]$summary.pending_jobs
-Say "대기 $pending 건 / 프로젝트 $($summary.projects)개 / 도는 시리즈 $($summary.active_series)개"
+# Flow 는 Chrome 하나를 물고 돈다. CDP 가 죽으면 그 시점부터 전 단계가 멈추는데
+# 조용히 멈춰서 알아채기까지 오래 걸린다 — 하루에 세 번 죽은 적이 있다. 깨어날 때마다 본다.
+try {
+  Invoke-WebRequest -Uri "http://127.0.0.1:9222/json/version" -TimeoutSec 5 -UseBasicParsing | Out-Null
+  Say "Chrome(9222) 정상"
+} catch {
+  Say "Chrome(9222) 응답 없음 — 다시 띄웁니다"
+  Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+    Where-Object { $_.CommandLine -like '*\.chrome-profile*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 4
+  & (Join-Path $root "launch-chrome.ps1")
+  Start-Sleep -Seconds 6
+}
 
-if ($pending -le 0) {
+$pending = [int]$summary.pending_jobs
+
+# pending_jobs 는 **대본 쪽 일만** 센다. 에이전트가 하는 일은 그보다 넓다 —
+# CLEAN·INFO·VIDEO·합성·발행이 남아 있어도 pending 은 0 이라, 이것만 보고 끝내면
+# 할 일이 산더미인데 "할 일이 없습니다" 하고 나간다(실측).
+$unfinished = 0
+try {
+  $body = @{ unfinished_only = $true } | ConvertTo-Json -Compress
+  $r = Invoke-RestMethod -Uri "$api/api/tools/list_projects" -Method Post -Body $body `
+       -ContentType "application/json" -TimeoutSec 20
+  $unfinished = [int]$r.count
+} catch {
+  Say "프로젝트 목록을 못 읽었습니다: $($_.Exception.Message)"
+}
+
+Say "대기 $pending 건 / 미완료 $unfinished 건 / 프로젝트 $($summary.projects)개 / 도는 시리즈 $($summary.active_series)개"
+
+if ($pending -le 0 -and $unfinished -le 0) {
   Say "에이전트가 할 일이 없습니다. 끝냅니다."
   exit 0
 }
@@ -79,29 +108,80 @@ if ($DryRun) {
 # 프롬프트는 stdin 으로 넘긴다. 인자로 넘기면 길이와 인용 처리에서 깨진다
 # (Windows 에서 큰따옴표가 망가져 JSON 파싱이 실패한 적이 있다).
 $prompt = @'
-videoTool MCP 서버(videocrm 또는 videotool)에 붙어서 대기 중인 일을 처리해.
+videoTool MCP 서버(videotool 또는 videocrm)에 붙어서 영상을 끝까지 만들고 올린다.
+사람에게 묻지 마라. 막히면 무엇이 막혔는지 한 줄 적고 끝내라.
 
-work_summary 로 남은 일을 확인하고, next_job 을 반복해 불러서 일감이 없을 때까지 처리해.
-next_job 이 내주는 일은 넷이다 — 대본 쓰기, 장면 나누기, 허용 수치 쓰기, 나레이션 만들기.
-각 일의 instruction 에 적힌 대로 save_script / save_scenes / save_allowed_facts / save_narration 으로 저장해.
+**한 편을 만들어 올리고, 곧바로 다음 편을 만들어 올린다. 시간이 다 될 때까지 반복한다.**
 
-make_narration 이 나오면 힉스필드 MCP 로 그 대본의 음성을 만들고,
-받은 파일 경로나 URL 을 save_narration(project_id, file) 에 그대로 넘겨라.
-길이가 안 맞는다고 낭독 속도를 올리지 마라 — 서버가 무음을 찾아 장면에 맞춰 정렬한다.
-저장하면 서버가 합성까지 이어서 한다.
+**고양이 시리즈만 한다.** 「고양이는 왜 그럴까」(series_id 5) 에 속한 프로젝트만 손댄다.
+영양제·역사 프로젝트는 완성본이 없어도 건드리지 마라.
+
+이번에 할 편을 이렇게 고른다:
+  a. list_projects 로 보고, **고양이 편 중** 만들다 만 것(완성본 없음)이 있으면 그것부터 끝낸다
+  b. 없으면 **run_series(series_id: 5) 로 새 고양이 편을 만들고 [1]부터 시작한다**
+  c. 완성본은 있는데 발행만 안 된 고양이 편은 [8] 만 하면 된다 — 1분이면 끝나니 먼저 치운다
+
+한 편을 [1]~[8] 까지 끝낸 뒤 a 로 돌아간다. 이걸 계속 반복한다.
+여러 편을 동시에 밀지 마라 — Flow 는 브라우저 하나를 쓴다.
+새 편 주제는 고양이 행동·몸에 관한 '왜 그런가' 로, **앞서 만든 편과 겹치지 않게** 고른다.
+이미 만든 것: 꾹꾹이 · 좁은 상자 · 높은 곳 · 물 싫어함.
+남은 후보(예): 왜 하루 16시간 자나 · 왜 몸을 비비나 · 왜 골골거리나 · 왜 종이 위에 앉나 ·
+왜 사냥감을 물어다 주나 · 왜 우다다를 하나 · 왜 좁은 곳을 통과하려 하나.
+
+[1] 대본이 없는 프로젝트
+    next_job 이 내주는 대로 save_script / save_scenes / save_allowed_facts 를 채운다.
+    - 한 장면은 클립 8초에 맞춰 공백 제외 38~42자. 짧으면 만든 영상을 버리게 된다
+    - 마지막 장면은 질문으로 끝낸다
+    - 낭독 속도로 길이를 맞추지 마라. 안 맞으면 글자 수를 고친다
+
+[2] CLEAN
+    flow_generate(project_id, stage: "clean")
+    flow_job 으로 done 이 될 때까지 기다린다(30초 간격). failed 여도 flow_harvest 로 회수해 본다.
+
+[3] 장면 순서 확인  ← 절대 건너뛰지 마라
+    contact_sheet(project_id, kind: "clean") 를 부르면 시트 파일 경로와
+    칸마다 어느 장면 대사인지가 나온다. 그 파일을 Read 로 **직접 열어 보고**,
+    칸의 그림이 그 장면 대사와 맞는지 하나씩 확인한다.
+    어긋나면 remap_scenes(kind: "clean", order: [...]) 로 고친다.
+    order 는 "1번 장면에 지금 몇 번 칸 그림을 쓸지" 의 나열이다. 예: [5,1,4,2,7,8,6,3]
+    배정 신뢰도가 높아도 순서는 뒤섞여 있다. 실제로 만든 편마다 전부 고쳐야 했다.
+
+[4] INFO
+    flow_generate(stage: "info") → 기다림 →
+    contact_sheet(kind: "info") 로 다시 확인한다. INFO 는 라벨이 붙어 있어 판단이 쉽다.
+    어긋나면 clean 과 info 를 **같은 order 로 함께** remap 한다. 둘은 짝이다.
+
+[5] VIDEO
+    flow_generate(stage: "video") → 기다림 → flow_harvest(stage: "video")
+    장면이 다 안 차면 flow_generate(stage: "video") 를 다시 부른다.
+    (없는 장면만 자동으로 요청한다. 3~4라운드가 걸릴 수 있다)
+    90% 이상 차면 다음으로 간다.
+
+[6] 음성
+    각 장면 대사를 힉스필드로 만든다:
+      generate_audio_batch(model "text2speech_v2", variant "elevenlabs",
+                           voice_type "preset", voice_id <프로젝트 보이스>)
+    한 번에 12개를 보내면 429 로 일부가 거부된다. submission_failed 는 다시 보낸다.
+    jobs_wait 로 끝나면 결과 URL 을 받아 projects/<id>/work/tts/sNN.mp3 로 내려받는다.
+
+[7] 합성
+      powershell -File .inish-video.ps1 -ProjectId <id>
+    나레이션 정렬·자막·합성을 한 번에 한다.
+
+[8] 발행
+    save_publish_meta(project_id, channel_slug, title, description, hashtags) 로 메타를 넣고
+    publish(project_id, channel_slug, confirm: true) 로 올린다.
+    channel_slug 는 그 프로젝트가 속한 시리즈의 channel_slug 를 쓴다.
+    공개 범위는 손대지 마라 — 채널 설정이 private 이면 서버가 무조건 private 으로 올린다.
+    제목은 영상 내용 그대로, 낚시 금지. 설명 끝에 마지막 장면의 질문을 넣는다.
 
 지켜야 할 것
-- 대본을 쓰기 전에 estimate_length 로 길이를 확인해. 목표 길이를 넘기면 TTS 가 두 배로 나온다
-- 장면은 시리즈의 상시 프롬프트와 주제 브리프를 따라라
-- 허용 수치를 반드시 채워라. 없으면 INFO 단계에서 대본에 없는 숫자가 화면에 그려진다
-- 낭독 속도를 조절해서 길이를 맞추지 마라. 안 맞으면 대본 글자 수를 고쳐라
+- [3] 과 [4] 의 시트 확인을 건너뛰지 마라. 이걸 빼면 대사와 화면이 끝까지 어긋난다
+- 한 번에 한 편만. 다른 편으로 넘어가기 전에 그 편을 끝낸다
+- 화면 제어(마우스·키보드)를 쓰지 마라. MCP 도구와 위에 적힌 명령만 쓴다
+- 크레딧이 나가는 일이다. 같은 단계를 이유 없이 두 번 돌리지 마라
 
-하지 말 것
-- flow_generate, assemble, publish 를 부르지 마라. 그건 서버가 알아서 한다
-- 화면 제어(마우스·키보드)를 쓰지 마라. MCP 도구만 써라
-- 사람에게 묻지 마라. 막히면 무엇이 막혔는지 한 줄로 적고 끝내라
-
-다 끝나면 처리한 건수를 한 줄로 보고하고 종료해.
+시간이 얼마 안 남았으면 새 편을 시작하지 말고, 만든 편과 올린 주소를 한 줄로 보고하고 종료해.
 '@
 
 New-Item -ItemType File -Path $lock -Force | Out-Null

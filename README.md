@@ -59,6 +59,8 @@ TTS 도 영상도 서버가 직접 부르지 않는다. 에이전트가 힉스�
 | Chrome | Flow 조종용, 디버그 포트 9222 |
 | tesseract (kor) | 허용 수치 검증용 (선택) |
 
+새 PC 에 처음 설치한다면 **[SETUP.md](SETUP.md)** 를 따라간다 — 구글 설정부터 무인 루프까지 순서대로 있다.
+
 ```bash
 mix setup                       # deps · DB · 시드
 mix run priv/repo/sync_prompts.exs   # priv/prompts/*.txt → DB

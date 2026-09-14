@@ -93,9 +93,17 @@ defmodule VideoTool.Credentials do
 
   defp escape(path), do: String.replace(path, "'", "''")
 
+  # PowerShell 7 이 깔려 있으면 PSModulePath 앞쪽에 그 경로가 끼어든다. 그러면
+  # Windows PowerShell 5.1 이 호환되지 않는 Microsoft.PowerShell.Security 를 집어서
+  # "모듈을 찾았지만 로드할 수 없습니다" 로 죽는다 — 실측: 유튜브 토큰 저장이 여기서 실패했다.
+  # 그래서 이 자식 프로세스에서만 5.1 기본 경로로 되돌린다.
+  @ps51_modules "C:\Program Files\WindowsPowerShell\Modules;" <>
+                  "C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules"
+
   defp powershell(script) do
     case System.cmd("powershell", ["-NoProfile", "-NonInteractive", "-Command", script],
-           stderr_to_stdout: true
+           stderr_to_stdout: true,
+           env: [{"PSModulePath", @ps51_modules}]
          ) do
       {_out, 0} -> {:ok, :done}
       {out, code} -> {:error, "exit #{code}: #{String.slice(out, 0, 300)}"}

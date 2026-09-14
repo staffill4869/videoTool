@@ -172,18 +172,37 @@ defmodule VideoTool.YouTube.Upload do
       }
     }
 
-    # captions.insert 는 메타데이터와 파일을 함께 보내는 multipart 다.
-    multipart =
-      {:multipart,
-       [
-         {"", Jason.encode!(metadata), [{"content-type", "application/json"}], []},
-         {"", to_srt(subtitles), [{"content-type", "application/octet-stream"}], []}
-       ]}
+    # captions.insert 는 메타데이터와 자막 파일을 함께 보내는 **multipart/related** 다.
+    # Req 에 `{:multipart, [...]}` 튜플을 그냥 넘기면 "protocol Enumerable not implemented
+    # for Tuple" 로 죽는다 (실측: 영상은 올라간 뒤 여기서 터졌다). 게다가 Req 의
+    # form_multipart 는 multipart/form-data 라 규격이 다르다. 그래서 몸통을 직접 만든다.
+    boundary = "vt" <> (:crypto.strong_rand_bytes(12) |> Base.url_encode64(padding: false))
+
+    body =
+      "--#{boundary}
+" <>
+        "Content-Type: application/json; charset=UTF-8
+
+" <>
+        Jason.encode!(metadata) <>
+        "
+--#{boundary}
+" <>
+        "Content-Type: application/octet-stream
+
+" <>
+        to_srt(subtitles) <>
+        "
+--#{boundary}--
+"
 
     case Req.post(@captions_url,
            params: [part: "snippet", uploadType: "multipart"],
-           headers: [{"authorization", "Bearer " <> token}],
-           body: multipart,
+           headers: [
+             {"authorization", "Bearer " <> token},
+             {"content-type", "multipart/related; boundary=#{boundary}"}
+           ],
+           body: body,
            receive_timeout: 120_000
          ) do
       {:ok, %{status: status}} when status in [200, 201] -> %{ok: true}

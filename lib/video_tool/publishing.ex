@@ -126,6 +126,21 @@ defmodule VideoTool.Publishing do
   def update_channel(%Channel{} = channel, attrs),
     do: channel |> Channel.changeset(attrs) |> Repo.update()
 
+  @doc """
+  발행 채널을 하나 만든다.
+
+  `credential_ref` 는 **행마다 달라야 한다.** 토큰이 그 경로에 저장되므로 두 행이 같은 ref 를
+  쓰면 같은 유튜브 채널로 올라간다 — 실제로 yt-main·yt-shorts 가 그랬다.
+  """
+  def create_channel(attrs) do
+    attrs =
+      Map.put_new_lazy(attrs, :credential_ref, fn ->
+        "videoCRM/#{attrs[:platform]}/#{attrs[:slug]}"
+      end)
+
+    %Channel{} |> Channel.changeset(attrs) |> Repo.insert()
+  end
+
   def fetch_channel(slug) do
     case Repo.get_by(Channel, slug: slug) do
       nil -> {:error, "채널 '#{slug}' 을(를) 찾을 수 없습니다"}
@@ -153,7 +168,10 @@ defmodule VideoTool.Publishing do
       title: title,
       description: description,
       hashtags: hashtags,
-      privacy: attrs["privacy"] || channel.default_privacy,
+      # 채널이 private 이면 무조건 private 이다. 무인 루프가 실수로 public 을 넣어도
+      # 공개로 나가지 않게 **코드에서** 막는다 — 프롬프트 지시만으로는 막을 수 없다.
+      # 공개로 바꾸려면 채널의 default_privacy 를 사람이 먼저 바꿔야 한다.
+      privacy: resolve_privacy(channel, attrs["privacy"]),
       scheduled_at: attrs["scheduled_at"]
     }
 
@@ -200,7 +218,7 @@ defmodule VideoTool.Publishing do
 
     checks = [
       {final != nil and final.passed, "최종 검증(final)이 통과되지 않았습니다"},
-      {Channel.token_valid?(channel),
+      {token_usable?(channel),
        "채널 '#{channel.slug}' 토큰이 만료됐습니다. reauth 를 먼저 실행하세요"},
       {channel.aspect_required in ["any", render.aspect],
        "채널은 #{channel.aspect_required} 를 요구하는데 렌더는 #{render.aspect} 입니다"},
@@ -215,6 +233,22 @@ defmodule VideoTool.Publishing do
       failures -> {:error, Enum.map(failures, fn {_, msg} -> msg end)}
     end
   end
+
+  # 만료 컬럼만 보고 막으면 refresh_token 이 멀쩡한데도 사람을 부르게 된다.
+  # access_token/1 이 만료 시 알아서 갱신하므로 갱신까지 시켜 보고 판정한다.
+  # (refresh_token 이 없거나 폐기됐으면 여기서 여전히 걸린다 — 그때는 진짜 reauth 가 필요하다)
+  defp token_usable?(%Channel{platform: "youtube"} = channel) do
+    Channel.token_valid?(channel) or
+      match?({:ok, _}, VideoTool.Publishing.GoogleOAuth.access_token(channel))
+  end
+
+  defp token_usable?(channel), do: Channel.token_valid?(channel)
+
+  # 채널이 private 이면 무조건 private 이다. 무인 루프가 실수로 public 을 넣어도
+  # 공개로 나가지 않게 **코드에서** 막는다 — 프롬프트 지시만으로는 막을 수 없다.
+  # 공개로 바꾸려면 채널의 default_privacy 를 사람이 먼저 바꿔야 한다.
+  defp resolve_privacy(%Channel{default_privacy: "private"}, _asked), do: "private"
+  defp resolve_privacy(channel, asked), do: asked || channel.default_privacy
 
   defp already_published?(project, channel, render) do
     Repo.exists?(

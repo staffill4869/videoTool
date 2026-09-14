@@ -437,7 +437,12 @@ defmodule VideoTool.Series.Runner do
   def init(_opts) do
     # 서버가 죽을 때 돌던 Flow 작업은 Task 와 함께 사라진다. 행만 'running' 으로 남으면
     # 자동 전진이 "이미 돌고 있다" 로 보고 영영 멈춘다 — 뜰 때 한 번 치운다.
-    if enabled?() do
+    #
+    # **웹을 실제로 띄울 때만 치운다.** `mix run priv/repo/xxx.exs` 같은 스크립트도
+    # 앱을 부팅하므로 이 init 이 돌아간다. 그때 치우면 **서버에서 멀쩡히 돌고 있는**
+    # Flow 작업까지 실패로 찍어 버린다 — 실측: 시리즈 설정을 바꾸는 스크립트 한 줄이
+    # 에이전트가 진행 중이던 VIDEO 작업을 죽였다.
+    if enabled?() and Phoenix.Endpoint.server?(:video_tool, VideoToolWeb.Endpoint) do
       case VideoTool.Jobs.sweep_orphaned_flow_jobs() do
         0 -> :ok
         n -> Logger.info("재시작으로 끊긴 Flow 작업 #{n}건을 실패로 정리했습니다")

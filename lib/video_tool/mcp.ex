@@ -85,6 +85,12 @@ defmodule VideoTool.MCP do
       tool("next", "다음에 할 일을 정하고 필요하면 프롬프트를 클립보드에 넣는다", %{
         "project_id" => int("프로젝트 id")
       }, ["project_id"]),
+      tool(
+        "list_projects",
+        "프로젝트 목록과 단계별 진행 상황. 무인 루프가 **어느 프로젝트를 이어서 할지 고르는 곳**이다. " <>
+          "단계(clean·info·clip)가 몇 개씩 찼는지, 완성본과 발행이 됐는지 한 번에 보여준다",
+        %{"unfinished_only" => bool("완성본이 없는 것만. 기본 true")}
+      ),
       tool("status", "프로젝트 현재 상태", %{"project_id" => int("프로젝트 id")}, ["project_id"]),
       tool(
         "render_prompt",
@@ -162,6 +168,15 @@ defmodule VideoTool.MCP do
           "burn_subtitles" => bool("자막 하드번 여부. 기본 true")
         },
         ["project_id"]
+      ),
+      tool(
+        "validate",
+        "단계 결과를 검증하고 기록한다. publish 는 stage: \"final\" 이 통과돼 있어야 진행된다",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "stage" => str("clean | info | clips | final")
+        },
+        ["project_id", "stage"]
       ),
       tool("make_vertical", "가로 완성본에서 9:16 세로본 생성 (4주차)", %{
         "project_id" => int("프로젝트 id")
@@ -673,6 +688,35 @@ defmodule VideoTool.MCP do
     end
   end
 
+  defp handle("list_projects", args) do
+    only_unfinished = args["unfinished_only"] != false
+
+    rows =
+      Projects.list_projects()
+      |> Enum.map(fn p ->
+        counts = Media.asset_counts(p.id)
+        renders = length(Media.renders(p.id))
+
+        %{
+          id: p.id,
+          title: p.title,
+          status: p.status,
+          series_id: p.series_id,
+          scenes: length(Projects.scenes(p.id)),
+          clean: counts["clean"] || 0,
+          info: counts["info"] || 0,
+          clip: counts["clip"] || 0,
+          renders: renders,
+          published: Publishing.publications(p.id) |> Enum.any?(&(&1.status == "published"))
+        }
+      end)
+      |> then(fn list ->
+        if only_unfinished, do: Enum.filter(list, &(&1.renders == 0 or not &1.published)), else: list
+      end)
+
+    %{ok: true, projects: rows, count: length(rows)}
+  end
+
   defp handle("work_summary", _args), do: Map.merge(%{ok: true}, Work.summary())
 
   defp handle("list_series", _args) do
@@ -1066,6 +1110,21 @@ defmodule VideoTool.MCP do
       end
     else
       {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle("validate", args) do
+    stage = args["stage"] || "final"
+
+    if stage in ~w(clean info clips final) do
+      with {:ok, project} <- Projects.get_project(args["project_id"]),
+           {:ok, result} <- VideoTool.Validation.run(project, stage) do
+        result |> Map.put(:ok, true) |> Map.put(:stage, stage)
+      else
+        {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+      end
+    else
+      %{ok: false, error: "stage 는 clean | info | clips | final 중 하나여야 합니다"}
     end
   end
 

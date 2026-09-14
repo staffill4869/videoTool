@@ -18,6 +18,8 @@ defmodule VideoTool.Publishing.GoogleOAuth do
   OAuth 를 안 붙여도 앱은 그대로 돈다.
   """
 
+  require Logger
+
   alias VideoTool.{Credentials, Publishing, Settings}
 
   @authorize_url "https://accounts.google.com/o/oauth2/v2/auth"
@@ -55,7 +57,10 @@ defmodule VideoTool.Publishing.GoogleOAuth do
           "response_type" => "code",
           "scope" => Enum.join(@scopes, " "),
           "access_type" => "offline",
-          "prompt" => "consent",
+          # consent 만 주면 계정·채널 선택창을 건너뛰고 **직전에 쓰던 채널**로 그냥 넘어간다.
+          # 브랜드 계정을 관리하고 있어도 목록을 볼 기회 자체가 없어진다 —
+          # 실측: 관리 중인 채널이 둘 있는데도 선택창이 안 떠서 개인 채널에 붙었다.
+          "prompt" => "select_account consent",
           "include_granted_scopes" => "true",
           "state" => state
         })
@@ -118,9 +123,38 @@ defmodule VideoTool.Publishing.GoogleOAuth do
         |> DateTime.add(tokens["expires_in"] || 3600, :second)
         |> DateTime.truncate(:second)
 
+      # 어느 유튜브 채널에 붙었는지 바로 확인해서 적어 둔다.
+      # 토큰은 **동의할 때 고른 채널**에 묶인다. 그런데 화면에는 우리가 붙인 이름만
+      # 보여서, 발행 채널 셋이 실수로 같은 유튜브 채널을 가리켜도 알 수가 없었다.
+      # 실패해도 연결 자체는 성공이므로 막지 않는다.
       Publishing.update_channel(channel, %{token_expires_at: expires_at})
+      |> tap(fn _ -> identify(channel, tokens["access_token"]) end)
     end
   end
+
+  @doc """
+  이 토큰이 어느 유튜브 채널 것인지 읽어 `account_id` 에 적는다.
+
+  돌려주는 값은 쓰지 않는다 — 부수적인 일이라 실패해도 연결을 되돌리지 않는다.
+  """
+  def identify(channel, access_token) when is_binary(access_token) do
+    url = "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true"
+
+    case Req.get(url, auth: {:bearer, access_token}, receive_timeout: 15_000) do
+      {:ok, %{status: 200, body: %{"items" => [%{"id" => id, "snippet" => snip} | _]}}} ->
+        title = snip["title"] || ""
+        Publishing.update_channel(channel, %{account_id: "#{id}|#{title}"})
+        {:ok, id, title}
+
+      other ->
+        Logger.warning("연결된 유튜브 채널을 못 읽었습니다: #{inspect(other)}")
+        :error
+    end
+  rescue
+    e -> Logger.warning("연결된 유튜브 채널 조회 실패: #{inspect(e)}")
+  end
+
+  def identify(_channel, _), do: :error
 
   defp existing_refresh(ref) do
     with {:ok, raw} <- Credentials.get(ref),
