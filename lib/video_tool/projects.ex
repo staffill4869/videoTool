@@ -36,7 +36,7 @@ defmodule VideoTool.Projects.Project do
     field :topic, :string, default: ""
     field :target_sec, :integer, default: 60
     field :aspect, :string, default: "16:9"
-    field :pipeline, :string, default: "ai"
+    field :pipeline, :string, default: "flow_auto"
     field :status, :string, default: "draft"
     field :work_dir, :string, default: ""
     field :output_folder, :string, default: ""

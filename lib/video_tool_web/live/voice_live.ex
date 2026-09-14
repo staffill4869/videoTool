@@ -126,7 +126,18 @@ defmodule VideoToolWeb.VoiceLive do
               </span>
             </div>
 
-            <audio :if={v.preview_url != ""} controls preload="none" src={v.preview_url} class="mt-2 w-full">
+            <%!-- 배타 재생: 하나를 틀면 나머지는 멈춘다. 안 그러면 목소리를 비교하려고
+                  연달아 누르는 순간 둘이 겹쳐 나서 어느 쪽이 어느 쪽인지 알 수 없다.
+                  HTML 에 그런 속성은 없어서 play 이벤트에서 나머지를 멈춘다.
+                  LiveView 왕복이 필요 없는 일이라 인라인으로 끝낸다. --%>
+            <audio
+              :if={v.preview_url != ""}
+              controls
+              preload="none"
+              src={v.preview_url}
+              onplay="document.querySelectorAll('audio').forEach(a => { if (a !== this) a.pause() })"
+              class="mt-2 w-full"
+            >
             </audio>
             <div :if={v.preview_url == ""} class="mt-2 text-xs text-base-content/50">
               미리듣기 없음

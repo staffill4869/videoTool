@@ -20,7 +20,7 @@ defmodule VideoTool.Series.Recipe do
     # 만들 언어들. 첫 번째가 원본, 나머지는 CLEAN 을 재사용하는 언어판이다.
     field :languages, {:array, :string}, default: ["ko"]
     field :target_sec, :integer, default: 60
-    field :pipeline, :string, default: "ai"
+    field :pipeline, :string, default: "flow_auto"
     field :output_folder, :string, default: ""
     # 이 시리즈로 만든 영상을 올릴 발행 채널. 비어 있으면 자동 발행하지 않는다.
     field :channel_slug, :string, default: ""
@@ -378,7 +378,7 @@ defmodule VideoTool.Series do
   end
 
   @doc """
-  아직 안 끝난 편의 수. 상한(`max_pending`)이 이 숫자를 본다.
+  아직 완성본이 없는 편의 수. 상한(`max_pending`)이 이 숫자를 본다.
 
   **`draft` 만 세면 안 된다.** 대본은 몇 분이면 써지고 그 순간 `scripted` 로 넘어가는데,
   거기서 끝난 게 아니다 — 그림 8장과 클립 8개가 남아 있고 그건 30분이 걸린다.
@@ -388,7 +388,22 @@ defmodule VideoTool.Series do
   그렇다고 `status` 로도 셀 수 없다 — **`scened` 에서 더 올라가지 않는다.** 이미 발행까지
   끝난 편도 `scened` 로 남아 있어서, 상태로 세면 상한에 걸려 영영 안 만든다.
   판정 기준은 **완성본(render)이 있느냐** 하나다.
+
+  `unfinished_everywhere/0` 은 같은 판정을 시리즈 구분 없이 한다. 상한은 시리즈마다지만
+  **Flow 는 기계 전체에 하나뿐**이라, 시리즈 둘이 각자 상한까지 채우면 아무도 못 끝내는
+  편이 줄줄이 선다 — 만들기만 하고 아무것도 안 끝나는 그림이 된다.
   """
+  def unfinished_everywhere do
+    Repo.one(
+      from p in Project,
+        as: :p,
+        where:
+          not is_nil(p.series_id) and
+            not exists(from r in "renders", where: r.project_id == parent_as(:p).id, select: 1),
+        select: count(p.id)
+    )
+  end
+
   def pending_count(series_id) do
     Repo.one(
       from p in Project,
@@ -418,7 +433,9 @@ defmodule VideoTool.Series do
   end
 
   defp run_one(series) do
-    pending = pending_count(series.id)
+    # 상한은 시리즈마다지만, **Flow 는 기계 전체에 하나뿐이다.** 시리즈 둘이 각자 상한까지
+    # 채우면 아무도 못 끝내는 편이 줄줄이 선다. 그래서 전체 미완료도 함께 본다.
+    pending = max(pending_count(series.id), unfinished_everywhere())
 
     if pending >= series.max_pending do
       # 다음 시각은 미뤄둔다. 안 그러면 매 틱마다 다시 걸린다.

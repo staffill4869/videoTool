@@ -511,16 +511,17 @@ defmodule VideoToolWeb.SeriesLive do
           <%!-- 글로만 고르면 "종이 디오라마" 와 "빈티지 콜라주" 가 뭐가 다른지 알 수 없다.
                 사진을 누르면 아래 그림체 칸이 채워진다. LiveView 왕복이 필요 없는 일이라
                 작은 인라인 JS 로 끝낸다 — 서버에 보낼 상태가 아니다. --%>
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <%!-- 세로 사진이라 한 장이 크면 화면을 다 먹는다. 폭을 고정하고 가로로 흘린다. --%>
+          <div class="flex gap-2 overflow-x-auto pb-2">
             <button
               :for={x <- Presets.styles_with_examples()}
               type="button"
               title={x.name}
               onclick={"document.getElementById('style-name-input').value = #{Jason.encode!(x.name)}"}
-              class="overflow-hidden rounded-lg border-2 border-base-300 hover:border-primary"
+              class="w-[84px] shrink-0 overflow-hidden rounded-lg border-2 border-base-300 hover:border-primary"
             >
-              <img src={x.url} alt={x.name} loading="lazy" class="aspect-[9/16] w-full object-cover" />
-              <div class="truncate px-1.5 py-1 text-xs">{x.name}</div>
+              <img src={x.url} alt={x.name} loading="lazy" class="h-[112px] w-full object-cover" />
+              <div class="truncate px-1 py-0.5 text-[10px] leading-tight">{x.name}</div>
             </button>
           </div>
         </.section>
@@ -543,18 +544,27 @@ defmodule VideoToolWeb.SeriesLive do
                 <option :for={x <- @styles} value={x.name}></option>
               </datalist>
             </.field>
-            <.field label="장르" hint="목록에 없으면 직접 쓰면 새로 만들어진다">
+            <%!-- 글자로만 두면 뭐가 있는지 몰라 매번 새 장르를 만들어 버린다.
+                  있는 것은 눌러서 고르고, 없는 것만 직접 친다. --%>
+            <.field label="장르" hint="눌러서 고르거나, 없으면 직접 쓰면 새로 만들어진다">
               <input
+                id="domain-name-input"
                 name="domain_name"
-                list="domain-options"
                 value={name_of(@domains, @s.domain_id)}
                 required
-                placeholder="고르거나 직접 입력"
+                placeholder="눌러서 고르거나 직접 입력"
                 class="input input-bordered input-sm w-full"
               />
-              <datalist id="domain-options">
-                <option :for={x <- @domains} value={x.name}></option>
-              </datalist>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <button
+                  :for={x <- @domains}
+                  type="button"
+                  onclick={"document.getElementById('domain-name-input').value = #{Jason.encode!(x.name)}"}
+                  class="badge badge-ghost badge-sm hover:badge-primary"
+                >
+                  {x.name}
+                </button>
+              </div>
             </.field>
             <.field label="보이스" hint="힉스필드 MCP 에서 들여온 목록">
               <select name="voice_id" class="select select-bordered select-sm w-full">
@@ -682,14 +692,8 @@ defmodule VideoToolWeb.SeriesLive do
                 class="input input-bordered input-sm w-full"
               />
             </.field>
-            <.field label="생성 경로">
-              <select name="pipeline" class="select select-bordered select-sm w-full">
-                <option value="ai" selected={@s.pipeline in [nil, "ai"]}>ai — 사람이 Flow 조작</option>
-                <option value="flow_auto" selected={@s.pipeline == "flow_auto"}>
-                  flow_auto — 브라우저 자동 조종
-                </option>
-              </select>
-            </.field>
+            <%!-- 생성 경로는 고르지 않는다. `ai`(사람이 Flow 를 직접 조작)로 만들어진 편은
+                  무인 루프에서 아무도 밀어 주지 않고 서 있는다. 항상 flow_auto 다. --%>
           </div>
         </.section>
 
