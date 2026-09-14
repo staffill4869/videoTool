@@ -1,7 +1,0 @@
-clean done : 7
-clean failed : 2
-info done : 7
-info failed : 1
-info running : 1
-video done : 5
-video failed : 6

@@ -216,11 +216,13 @@ defmodule VideoToolWeb.ProjectLive.Show do
         <div :if={@renders != []} class="grid gap-4 lg:grid-cols-2">
           <div :for={r <- @renders} class="card bg-base-200">
             <div class="card-body gap-2 p-3">
+              <%!-- 9:16 은 `w-full` 만 주면 폭에 맞춰 세로로 늘어나 화면을 통째로 먹는다.
+                    높이를 창 높이의 60%로 막고 가운데 정렬한다. --%>
               <video
                 src={~p"/renders/#{r.id}/play"}
                 controls
                 preload="metadata"
-                class="w-full rounded bg-black"
+                class="mx-auto max-h-[60vh] w-auto max-w-full rounded bg-black"
               >
               </video>
               <div class="flex flex-wrap items-center gap-2 text-xs opacity-70">

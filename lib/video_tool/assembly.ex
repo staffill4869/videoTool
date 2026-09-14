@@ -135,7 +135,13 @@ defmodule VideoTool.Assembly do
           clip = by_scene[scene.id].duration_sec || 0.0
           spoken = secs[to_string(scene.scene_no)] || secs[scene.scene_no]
           # 마지막 장면은 통째로. 음성이 없는 장면도 클립 길이 그대로 둔다.
-          d = if scene.id == last.id or is_nil(spoken), do: clip, else: spoken * 1.0
+          # **클립보다 길게 잡지 않는다.** 8초짜리에 8.5초를 요구하면 잘라 봐야 8초만 나오고,
+          # 시간표만 0.5초 앞서 가서 그 차이가 뒤로 계속 쌓인다 (드리프트의 정체다).
+          d =
+            cond do
+              scene.id == last.id or is_nil(spoken) -> clip
+              true -> min(spoken * 1.0, clip)
+            end
           stop = Float.round(cursor + d, 3)
 
           {%{
@@ -163,9 +169,11 @@ defmodule VideoTool.Assembly do
       files ->
         files
         |> Enum.flat_map(fn f ->
+          # 파일은 s01 인데 장면 번호는 1 이다. 앞자리 0 을 떼지 않으면 키가 안 맞아
+          # 조용히 예전 방식(클립 길이)으로 떨어진다 — mode 만 tight 로 찍히고 시간은 그대로였다.
           with [_, no] <- Regex.run(~r/s(\d+)\./, Path.basename(f)),
                {:ok, d} <- Ffmpeg.duration(f) do
-            [{no, d}]
+            [{no |> String.to_integer() |> Integer.to_string(), d}]
           else
             _ -> []
           end

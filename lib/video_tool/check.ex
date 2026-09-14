@@ -17,6 +17,7 @@ defmodule VideoTool.Check do
     checks =
       [
         alignment(project),
+        audio_matches_script(project),
         clip_coverage(project),
         subtitle_text(project),
         thumbnail(project),
@@ -52,6 +53,51 @@ defmodule VideoTool.Check do
 
       _ ->
         fail("정렬", "장면 시간표가 없습니다")
+    end
+  end
+
+  # ── 음성이 지금 대본으로 만든 것인가 ───────────────────────────
+  #
+  # 대본을 고친 뒤 음성을 다시 안 만들면, **자막은 새 대본이고 음성은 옛 대본**이 된다.
+  # 실측(55번): 음성은 v1 로 만들었는데 자막은 v3 였다. 장면 4 는 음성이 42자짜리를 읽는데
+  # 자막에는 27자가 떠 있었고, 장면 8 은 반대였다. 그대로 발행됐다.
+  #
+  # 어느 대본으로 읽었는지는 파일에 안 적혀 있다. 대신 **글자 수로 추정한 길이와 실제 음성
+  # 길이**를 장면마다 비교한다. 같은 글을 읽었으면 붙어 있고, 다른 글이면 벌어진다.
+  defp audio_matches_script(project) do
+    dir = Path.join(["projects", "#{project.id}", "work", "tts"])
+    cps = (project.voice && project.voice.chars_per_sec) || 5.0
+
+    # **자막 줄이 아니라 장면 글로 비교한다.** 자막은 문장 단위로 쪼개져서 장면보다 줄이 많다
+    # (8장면에 12줄). 번호로 맞추면 3번째부터 어긋나서, 멀쩡한 편을 틀렸다고 잡는다.
+    with script when not is_nil(script) <- Projects.active_script(project.id),
+         segments when segments != [] <- Projects.segments_for(script.id),
+         files when files != [] <- Path.wildcard(Path.join(dir, "s*.mp3")) do
+      by_scene = Map.new(segments, &{&1.scene_no, &1.text})
+
+      gaps =
+        files
+        |> Enum.flat_map(fn f ->
+          with [_, no] <- Regex.run(~r/s(\d+)\./, Path.basename(f)),
+               scene_no <- String.to_integer(no),
+               text when not is_nil(text) <- by_scene[scene_no],
+               {:ok, actual} <- VideoTool.Ffmpeg.duration(f) do
+            want = String.length(String.replace(text, " ", "")) / cps
+            [{scene_no, abs(want - actual)}]
+          else
+            _ -> []
+          end
+        end)
+
+      worst = gaps |> Enum.max_by(&elem(&1, 1), fn -> {0, 0.0} end)
+
+      cond do
+        gaps == [] -> nil
+        elem(worst, 1) > 2.5 -> fail("대본↔음성", "장면 #{elem(worst, 0)} 에서 #{r(elem(worst, 1))}초 차이 — 대본을 고친 뒤 음성을 다시 안 만든 것 같습니다")
+        true -> ok("대본↔음성", "같은 대본으로 읽혔습니다")
+      end
+    else
+      _ -> nil
     end
   end
 
