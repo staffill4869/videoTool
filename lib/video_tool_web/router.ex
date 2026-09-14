@@ -29,6 +29,7 @@ defmodule VideoToolWeb.Router do
       live "/dashboard", DashboardLive, :index
       live "/series", SeriesLive, :index
       live "/prompts", PromptLive, :index
+      live "/voices", VoiceLive, :index
       live "/channels", ChannelLive, :index
     end
 

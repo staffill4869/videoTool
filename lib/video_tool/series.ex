@@ -22,6 +22,8 @@ defmodule VideoTool.Series.Recipe do
     field :target_sec, :integer, default: 60
     field :pipeline, :string, default: "ai"
     field :output_folder, :string, default: ""
+    # 이 시리즈로 만든 영상을 올릴 발행 채널. 비어 있으면 자동 발행하지 않는다.
+    field :channel_slug, :string, default: ""
     # 이 시리즈로 만드는 프로젝트가 물려받을 자막 폰트.
     field :subtitle_font, :string, default: ""
     # 낭독 속도는 시리즈에도 열어두지만 기본은 0(보통)이다.
@@ -53,6 +55,7 @@ defmodule VideoTool.Series.Recipe do
   end
 
   @fields ~w(name topic_brief standing_prompt aspect languages target_sec pipeline output_folder
+             channel_slug
              interval_minutes active max_pending style_id domain_id voice_id
              subtitle_font voice_speech_rate run_times run_days auto_advance
              last_run_at next_run_at last_error created_count)a

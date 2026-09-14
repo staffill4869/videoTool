@@ -304,6 +304,33 @@ async function revealVideos(page, limit = 40) {
   return out;
 }
 
+// Flow 의 결과물 주소는 **두 가지 형식**이다 (둘 다 실측):
+//   https://flow.google.com/asb/<긴 토큰>              ← 영상이 주로 이쪽
+//   https://flow-content.google/(image|video)/<uuid>   ← 이미지가 주로 이쪽
+// 걸러야 하는 건 구글 썸네일(`...=s512-rw`)이다 — 남의 프로젝트 타일이 이 모양으로 섞여 들어왔다.
+// UUID 만 받게 했다가 /asb/ 영상 8개를 전부 놓친 적이 있다. 형식을 좁히지 말고 썸네일만 배제한다.
+function isResultUrl(src) {
+  const path = String(src).split("?")[0];
+  if (/=s\d+(-|$)/.test(path)) return false; // 구글 썸네일 크기 지정
+  return /\/asb\//.test(path) || /flow-content\.google\/(image|video)\//.test(path);
+}
+
+// 정해진 Flow 프로젝트로 간다. 한 편은 한 프로젝트 안에서 끝내야 한다 —
+// 단계마다 새로 열면 앞 단계 이미지가 없어 두 프레임을 이어 붙일 수 없고,
+// 재시도할 때마다 빈 프로젝트가 쌓인다 (실제로 우수수 생겼다).
+async function openUrl(browser, cfg, { url }) {
+  if (!url) throw new Error("url 이 없습니다.");
+  const page = await flowPage(browser, cfg, { open: false });
+  if (!page) throw new Error("Flow 탭이 없습니다.");
+
+  if (page.url().split("?")[0] !== url.split("?")[0]) {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(2500);
+  }
+  await dismissOverlays(page, cfg);
+  return { ok: true, url: page.url() };
+}
+
 async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
   if (!dir) throw new Error("harvest 에는 저장할 dir 이 필요합니다.");
   await mkdir(dir, { recursive: true });
@@ -337,7 +364,10 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
     for (const it of items) {
       // 서명된 주소라 만료 파라미터가 붙는다. 경로 마지막 조각이 실제 식별자다.
       const id = it.src.split("?")[0].split("/").pop();
-      if (id && !seen.has(id)) seen.set(id, it);
+      // **UUID 형태만 받는다.** 구글 썸네일(`...=s512-rw`)이 같은 셀렉터에 걸려
+      // 남의 프로젝트 타일 6장을 우리 자산으로 등록한 적이 있다.
+      // 진짜 생성물의 식별자는 언제나 UUID 다.
+      if (id && isResultUrl(it.src) && !seen.has(id)) seen.set(id, it);
     }
   };
 
@@ -353,7 +383,7 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
   if (kind === "all" || kind === "video") {
     for (const it of await revealVideos(page)) {
       const id = it.src.split("?")[0].split("/").pop();
-      if (id && !seen.has(id)) seen.set(id, it);
+      if (id && isResultUrl(it.src) && !seen.has(id)) seen.set(id, it);
     }
   }
 
@@ -469,6 +499,16 @@ async function pasteAndGenerate(browser, cfg, { prompt }) {
 
   const page = await flowPage(browser, cfg);
   await page.bringToFront();
+
+  // /project/<id>/edit/<...> 는 **낱장 편집 화면**이다. 여러 장 생성이 안 되고,
+  // 프롬프트를 넣으면 "7번 이미지 (요약): ..." 처럼 설명만 쓰고 끝난다.
+  // classify 는 /project/ 만 보고 editor 로 판단하므로 여기서 따로 걸러 되돌아간다.
+  const edit = page.url().match(/^(https?:\/\/[^/]+\/project\/[^/]+)\/edit\//);
+  if (edit) {
+    await page.goto(edit[1], { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+  }
+
   await dismissOverlays(page, cfg);
 
   const box = await locate(page, cfg.promptBox, "프롬프트 입력칸");
@@ -499,7 +539,12 @@ async function pasteAndGenerate(browser, cfg, { prompt }) {
 
   await button.click({ timeout: 15000 });
 
-  return { ok: true, inserted_chars: prompt.length, results_before: before };
+  // 생성 **전에** 화면에 있던 id 를 함께 돌려준다. 회수 때 이걸 빼야
+  // 남의 프로젝트 이미지를 가져오지 않는다 — INFO 단계에서 Flow 가 편집 화면(/edit/)으로
+  // 넘어가면 다른 프로젝트 자산까지 22장이 깔려 있었고, 그중 6장을 우리 것으로 등록했다.
+  const idsBefore = await resultIds(page);
+
+  return { ok: true, inserted_chars: prompt.length, results_before: before, ids_before: idsBefore };
 }
 
 // 화면에 있는 결과물의 **id** 를 모은다. 개수가 아니라 id 로 세야 하는 이유:
@@ -726,9 +771,37 @@ async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0
 // 돈이 나가는 결정이라 dismiss(덮개 치우기)와 섞지 않고 따로 둔다 — 같은 목록에 넣으면
 // 덮개인 줄 알고 눌러버리는 사고가 난다 (Get started 를 dismiss 에 넣었다가 겪었다).
 async function approveIfAsked(page, cfg) {
-  // locate 를 쓴다. 예전엔 여기서 getByRole 만 직접 불러서 role 이 button 이 아닌
-  // (menuitem 이거나 아예 역할이 없는) 승인 항목을 못 찾았고, 그러면 아래 confirmText 가
-  // 대신 나가 "승인해 주세요" 를 말로 때웠다 — 말로 하면 다음 단계에서 또 묻는다.
+  // 승인 항목은 버튼이 아니다 — `div.agent-bubble` 안의 `span.option-label` 이다
+  // (role 도 없고 <button> 도 아니라 getByRole 로는 영영 못 찾는다).
+  // 같은 글자가 화면 여러 곳에 있으므로(우리가 보낸 답장까지) 반드시
+  // **에이전트 말풍선 안에서, 아직 쓰이지 않은(dimmed 아닌) 것, 가장 마지막 것**을 누른다.
+  for (const want of ["항상 승인", "승인", "Always allow", "Always approve", "Approve", "Allow"]) {
+    const clicked = await page
+      .evaluate((label) => {
+        const opts = [...document.querySelectorAll(".agent-bubble .option-label")].filter(
+          (e) => (e.textContent || "").trim() === label
+        );
+        const live = opts.filter((e) => !e.classList.contains("dimmed"));
+        const target = (live.length ? live : opts).pop();
+        if (!target) return false;
+
+        // 실제로 눌리는 건 가까운 조상일 수 있다. 위로 올라가며 눌러 본다.
+        let n = target;
+        for (let d = 0; d < 4 && n; d++) {
+          if (n.getBoundingClientRect().width > 0) {
+            n.click();
+            return true;
+          }
+          n = n.parentElement;
+        }
+        return false;
+      }, want)
+      .catch(() => false);
+
+    if (clicked) return true;
+  }
+
+  // 예전 방식도 남겨 둔다 — UI 가 버튼으로 돌아갈 수 있다.
   for (const list of [cfg.approveAlways, cfg.approveOnce]) {
     if (!list || !list.length) continue;
 
@@ -736,16 +809,17 @@ async function approveIfAsked(page, cfg) {
     try {
       btn = await locate(page, list, "승인 버튼", 800);
     } catch {
-      continue; // 이 목록은 안 보인다 — 다음 목록
+      continue;
     }
 
     try {
       await btn.click({ timeout: 3000 });
       return true;
     } catch {
-      /* 눌리지 않으면 다음 목록 */
+      /* 다음 목록 */
     }
   }
+
   return false;
 }
 
@@ -845,6 +919,8 @@ try {
   const result =
     cmd.action === "status"
       ? await status(browser, cfg)
+      : cmd.action === "open_url"
+        ? await openUrl(browser, cfg, cmd)
       : cmd.action === "new_project"
         ? await newProject(browser, cfg)
         : cmd.action === "harvest"

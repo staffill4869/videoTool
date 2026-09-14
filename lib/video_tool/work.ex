@@ -145,16 +145,36 @@ defmodule VideoTool.Work do
     end
   end
 
+  # 마지막 장면을 요약으로 닫으면 사람들이 "그렇구나" 하고 나간다.
+  # 질문으로 끝내면 댓글에 자기 경험과 판단을 쓴다 — 그게 노출로 돌아온다.
   defp instruction("write_script"),
     do:
       "대본을 써서 save_script(project_id, raw_text) 로 저장하세요. " <>
-        "estimate_length 로 길이를 먼저 확인하세요 — 목표 글자수를 넘기면 TTS 가 두 배로 나옵니다."
+        "한 장면은 클립 길이(8초)에 맞춰 공백 제외 38~42자로 씁니다 " <>
+        "(ElevenLabs 실측 초당 5.0자). 짧게 쓰면 장면마다 침묵이 생기고, " <>
+        "만든 영상을 그만큼 버리게 됩니다.
+" <>
+        "**마지막 장면은 질문으로 끝냅니다.** 요약으로 닫지 말고, 본 사람이 " <>
+        "댓글에 자기 경험이나 판단을 쓰게 만드는 질문 한 문장으로 마칩니다:
+" <>
+        "- 영상에서 다룬 내용을 근거로 답할 수 있는 질문일 것 (딴 이야기 금지)
+" <>
+        "- 예·아니오로 끝나지 않게, 의견이 갈리는 지점을 물을 것 " <>
+        "(\"어느 쪽이…\", \"당신이라면…\", \"이건 왜…\")
+" <>
+        "- 구독·좋아요·댓글 요청 문구는 넣지 말 것. 질문 자체가 초대다
+" <>
+        "- 마지막 장면도 8초짜리다. 짧은 마무리 한 마디 + 질문으로 38~42자를 채울 것
+" <>
+        "  예) \"직선은 시간을 아끼려는 계산이었습니다. 지금 우리가 쓰는 길은 " <>
+        "무엇을 아끼려고 그렇게 놓였을까요?\""
 
   defp instruction("split_scenes"),
     do:
       "대본을 장면으로 나눠 save_scenes(project_id, scenes) 로 저장하세요. " <>
-        "각 장면은 3~4초, 5초를 넘기지 마세요. shot_prompt · info_instruction · " <>
-        "camera_plan · expected_labels 를 채우세요."
+        "장면 8개, 각 target_sec 은 8입니다 — Flow 클립이 8초로 나옵니다. " <>
+        "shot_prompt · info_instruction · camera_plan · expected_labels 를 채우세요. " <>
+        "마지막 장면(purpose: close)의 segment_text 는 질문으로 끝나야 합니다."
 
   defp instruction("translate_script"),
     do:

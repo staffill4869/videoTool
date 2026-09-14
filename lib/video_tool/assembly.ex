@@ -22,7 +22,9 @@ defmodule VideoTool.Assembly do
 
   `src` 는 로컬 경로 또는 http(s) URL.
   """
-  def save_narration(project, src) do
+  def save_narration(project, src), do: save_narration(project, src, [])
+
+  def save_narration(project, src, opts) do
     with {:ok, script} <- fetch_script(project),
          {:ok, path} <- place_audio(project, src),
          {:ok, duration} <- Ffmpeg.duration(path),
@@ -30,7 +32,9 @@ defmodule VideoTool.Assembly do
       segments = Projects.segments_for(script.id)
       # 클립이 다 있으면 **클립 길이가 곧 장면 시간**이다. 글자 수 비례로 나누면
       # 영상은 8초씩 가는데 자막은 6초씩 가서 장면마다 어긋난다 (실측: 4번째에서 9초).
-      timing = clip_timing(project) || scene_timing(segments, duration, silences)
+      timing =
+        narration_timing(project, opts[:scene_secs]) ||
+          clip_timing(project) || scene_timing(segments, duration, silences)
       cps = measured_cps(segments, duration)
 
       attrs = %{
@@ -71,12 +75,7 @@ defmodule VideoTool.Assembly do
   """
   def clip_timing(project) do
     scenes = Projects.scenes(project.id)
-
-    by_scene =
-      Media.list_assets(project.id, "clip")
-      |> Enum.filter(& &1.scene_id)
-      |> Enum.group_by(& &1.scene_id)
-      |> Map.new(fn {sid, list} -> {sid, Enum.max_by(list, & &1.order_confidence)} end)
+    by_scene = clips_by_scene(project)
 
     # 클립이 붙은 장면만 쓴다. 전부 있어야만 동작하게 두면 한 장면만 비어도
     # 정렬이 통째로 옛 방식(글자 수 비례)으로 되돌아간다.
@@ -98,6 +97,54 @@ defmodule VideoTool.Assembly do
 
       rows
     end
+  end
+
+  @doc """
+  장면 뒤에 남는 무음을 없앤다.
+
+  장면마다 클립(8초)이 나레이션(5초)보다 길면 그 차이가 통째로 무음으로 남았다.
+  여기서는 각 장면의 화면 길이를 **그 장면 나레이션 길이**로 잡아 뒤를 잘라내고,
+  **마지막 장면만 클립을 통째로** 남긴다 (끝맺음 여운은 있어야 한다).
+
+  `scene_secs` 는 장면 번호 → 그 장면 음성 길이(초). 없으면 nil 을 돌려
+  기존 방식(클립 길이 = 장면 길이)으로 떨어진다.
+  """
+  def narration_timing(_project, nil), do: nil
+  def narration_timing(_project, secs) when secs == %{}, do: nil
+
+  def narration_timing(project, secs) when is_map(secs) do
+    scenes = Projects.scenes(project.id)
+    by_scene = clips_by_scene(project)
+    usable = Enum.filter(scenes, &Map.has_key?(by_scene, &1.id))
+    last = List.last(usable)
+
+    if usable != [] do
+      {rows, _} =
+        Enum.map_reduce(usable, 0.0, fn scene, cursor ->
+          clip = by_scene[scene.id].duration_sec || 0.0
+          spoken = secs[to_string(scene.scene_no)] || secs[scene.scene_no]
+          # 마지막 장면은 통째로. 음성이 없는 장면도 클립 길이 그대로 둔다.
+          d = if scene.id == last.id or is_nil(spoken), do: clip, else: spoken * 1.0
+          stop = Float.round(cursor + d, 3)
+
+          {%{
+             "scene_id" => scene.id,
+             "start" => Float.round(cursor, 3),
+             "end" => stop,
+             "target_sec" => Float.round(d, 3),
+             "mode" => "tight"
+           }, stop}
+        end)
+
+      rows
+    end
+  end
+
+  defp clips_by_scene(project) do
+    Media.list_assets(project.id, "clip")
+    |> Enum.filter(& &1.scene_id)
+    |> Enum.group_by(& &1.scene_id)
+    |> Map.new(fn {sid, list} -> {sid, Enum.max_by(list, & &1.order_confidence)} end)
   end
 
   defp fetch_script(project) do
@@ -278,6 +325,7 @@ defmodule VideoTool.Assembly do
     with {:ok, narration} <- fetch_narration(project),
          {:ok, clips} <- fetch_clips(project),
          {:ok, plan} <- build_plan(clips, narration),
+         opts = Keyword.put_new(opts, :fit, fit_mode(narration)),
          {:ok, pieces} <- retime_all(plan, dir, opts),
          {:ok, master} <- concat_and_mix(pieces, narration, dir),
          {:ok, final} <- burn_subtitles(master, narration, dir, opts) do
@@ -312,6 +360,14 @@ defmodule VideoTool.Assembly do
          }}
       end
     end
+  end
+
+  # 나레이션을 장면 길이에 맞춰 저장했으면(tight) 클립 뒤를 잘라 쓴다.
+  # 그게 아니면 예전대로 클립을 통째로 쓴다.
+  defp fit_mode(narration) do
+    if Enum.any?(List.wrap(narration.scene_timing), &(&1["mode"] == "tight")),
+      do: :scenes,
+      else: :clips
   end
 
   defp fetch_narration(project) do
@@ -416,7 +472,7 @@ defmodule VideoTool.Assembly do
   클립 하나를 목표 길이에 맞춘다 (§5.4).
 
   f = 목표 / 원본.
-    f < 0.85  → 원본이 길다. 앞에서부터 목표만큼 잘라 쓴다
+    f < 0.85  → 원본이 길다. **앞을 버리고 뒤에서부터** 목표만큼 쓴다 (마지막 프레임이 결론이다)
     0.85~1.35 → 배속으로 맞춘다. 이 정도는 눈에 안 띈다
     f > 1.35  → 원본이 너무 짧다. 1.35배까지만 늘리고 나머지는 마지막 프레임을 정지로 채운다
                 (더 늘리면 슬로모션이 티가 난다)
@@ -427,7 +483,7 @@ defmodule VideoTool.Assembly do
       f = target / source
 
       cond do
-        f < @speed_min -> trim(src, target, out, aspect)
+        f < @speed_min -> trim(src, source, target, out, aspect)
         f <= @speed_max -> speed(src, f, out, aspect)
         true -> speed_then_hold(src, source, target, out, aspect)
       end
@@ -436,15 +492,34 @@ defmodule VideoTool.Assembly do
     end
   end
 
-  defp trim(src, target, out, aspect) do
-    args = ["-v", "error", "-y", "-i", src, "-t", f(target), "-an"] ++ enc(aspect) ++ [out]
+  # **앞을 자른다. 뒤가 아니다.**
+  # 장면의 마지막 프레임이 INFO 그림 — 라벨·수치가 다 얹힌 그 장면의 결론이다.
+  # 뒤를 자르면 장면마다 하려던 말을 끝내기 직전에 끊는다.
+  defp trim(src, source, target, out, aspect) do
+    start = max(source - target, 0)
+
+    args =
+      ["-v", "error", "-y", "-ss", f(start), "-i", src, "-t", f(target)] ++
+        enc(aspect) ++ audio_args(src, nil) ++ [out]
+
     done(args, out)
+  end
+
+  # 리타이밍한 조각도 소리를 갖고 가야 한다. -an 으로 지우면 Flow 가 만든 배경음이
+  # 통째로 사라진다 (실측: 합성본에 나레이션만 남았다).
+  defp audio_args(src, af) do
+    if has_audio?(src) do
+      if(af, do: ["-filter:a", af], else: []) ++ ["-c:a", "aac", "-b:a", "192k"]
+    else
+      ["-an"]
+    end
   end
 
   defp speed(src, factor, out, aspect) do
     args =
-      ["-v", "error", "-y", "-i", src, "-filter:v", "setpts=#{f(factor)}*PTS", "-an"] ++
-        enc(aspect) ++ [out]
+      ["-v", "error", "-y", "-i", src] ++
+        enc(aspect, "setpts=#{f(factor)}*PTS") ++
+        audio_args(src, "atempo=#{f(1 / factor)}") ++ [out]
 
     done(args, out)
   end
@@ -458,7 +533,12 @@ defmodule VideoTool.Assembly do
       "setpts=#{f(@speed_max)}*PTS," <>
         "tpad=stop_mode=clone:stop_duration=#{f(hold)}"
 
-    args = ["-v", "error", "-y", "-i", src, "-filter:v", chain, "-an"] ++ enc(aspect) ++ [out]
+    # apad 는 -t 와 짝이다. -t 없이 쓰면 출력이 끝나지 않는다 (실측: 9분간 파일이 자랐다).
+    args =
+      ["-v", "error", "-y", "-i", src] ++
+        enc(aspect, chain) ++
+        audio_args(src, "atempo=#{f(1 / @speed_max)},apad") ++ ["-t", f(target), out]
+
     done(args, out)
   end
 
@@ -467,13 +547,22 @@ defmodule VideoTool.Assembly do
   # 해상도를 1920x1080 으로 박아두면 **세로 클립이 가로 판에 끼워져** 좌우가 검게 되고
   # 자막도 그 넓은 판 기준으로 얹힌다 — 실측: 720x1280 클립이 1920x1080 으로 나왔다.
   # 화면비를 받아서 판을 정한다.
-  defp enc(aspect) do
+  defp enc(aspect), do: enc(aspect, nil)
+
+  # 앞에 붙일 필터(setpts, tpad …)는 여기로 넘긴다. `-filter:v` 로 따로 주면
+  # enc 의 `-vf` 가 덮어써서 배속이 조용히 사라진다 — 같은 옵션이기 때문이다.
+  defp enc(aspect, pre) do
     {w, h} = if aspect == "9:16", do: {1080, 1920}, else: {1920, 1080}
+
+    chain =
+      [pre, "scale=#{w}:#{h}:force_original_aspect_ratio=decrease",
+       "pad=#{w}:#{h}:(ow-iw)/2:(oh-ih)/2:black", "setsar=1"]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(",")
 
     [
       "-r", "30",
-      "-vf", "scale=#{w}:#{h}:force_original_aspect_ratio=decrease," <>
-             "pad=#{w}:#{h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+      "-vf", chain,
       "-c:v", "libx264",
       "-preset", "medium",
       "-crf", "23",
@@ -496,27 +585,88 @@ defmodule VideoTool.Assembly do
 
     out = Path.join(dir, "master_nosub.mp4")
 
+    # 소리는 세 겹이다: 클립 효과음 · 배경 음악 · 나레이션.
+    # Flow 에는 효과음만 만들게 한다 (대사도 음악도 넣지 말라고 상시 지시에 박아 뒀다).
+    # 음악은 여기서 깐다 — work/bgm.* 가 있으면 쓰고, 없으면 그냥 두 겹으로 간다.
+    sfx? = has_audio?(List.first(pieces))
+    bgm = find_bgm(dir)
+
+    # 무한 반복하는 입력(-stream_loop) 과 apad 가 섞이면 끝나는 지점이 사라진다.
+    # 그래서 길이를 여기서 못 박는다 — 조각 길이의 합이 곧 영상 길이다.
+    total = Enum.reduce(pieces, 0.0, fn p, acc -> acc + (probe_sec(p) || 0.0) end)
+
+    inputs =
+      ["-f", "concat", "-safe", "0", "-i", list, "-i", narration.file_path] ++
+        if bgm, do: ["-stream_loop", "-1", "-i", bgm], else: []
+
+    # 나레이션이 위, 효과음은 낮게, 음악은 더 낮게.
+    layers =
+      (if sfx?, do: ["[0:a]volume=0.25[sfx]"], else: []) ++
+        (if bgm, do: ["[2:a]volume=0.10[bgm]"], else: []) ++
+        ["[1:a]volume=1.0,apad[nar]"]
+
+    mixed = (if sfx?, do: ["[sfx]"], else: []) ++ (if bgm, do: ["[bgm]"], else: []) ++ ["[nar]"]
+
+    audio =
+      if sfx? or bgm do
+        [
+          "-filter_complex",
+          Enum.join(layers, ";") <>
+            ";" <>
+            Enum.join(mixed) <>
+            "amix=inputs=#{length(mixed)}:duration=longest:dropout_transition=0," <>
+            "dynaudnorm=p=0.9[a]",
+          "-map", "[a]"
+        ]
+      else
+        # 소리 없는 클립에 음악도 없다 — 나레이션만 싣고 뒤는 무음으로 채운다.
+        ["-map", "1:a:0", "-af", "apad"]
+      end
+
     args =
-      [
-        "-v", "error", "-y",
-        "-f", "concat", "-safe", "0", "-i", list,
-        "-i", narration.file_path,
-        "-map", "0:v:0",
-        # 클립에도 소리가 있다 (실측 mean -22.5dB). 예전엔 나레이션만 가져가서
-        # Flow 가 만든 배경음·효과음을 통째로 버렸다. 낮게 깔고 나레이션을 위에 얹는다.
-        "-filter_complex",
-        "[0:a]volume=0.18[bg];[1:a]volume=1.0,apad[nar];" <>
-          "[bg][nar]amix=inputs=2:duration=first:dropout_transition=0,dynaudnorm=p=0.9[a]",
-        "-map", "[a]",
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        # amix 의 duration:first 가 첫 입력(클립 소리 = 영상 길이)에 맞춘다.
-        # 나레이션이 짧으면 apad 가 무음으로 채운다 — 영상은 전부 살고 뒤는 배경음만 남는다.
-        "-shortest",
-        out
-      ]
+      ["-v", "error", "-y"] ++
+        inputs ++
+        ["-map", "0:v:0"] ++
+        audio ++
+        [
+          "-c:v", "copy",
+          "-c:a", "aac", "-b:a", "192k",
+          "-t", f(total),
+          out
+        ]
 
     done(args, out)
+  end
+
+  @doc """
+  이 프로젝트에 깔 배경 음악. `work/bgm.mp3`(또는 wav·m4a·ogg) 를 두면 쓴다.
+
+  서버가 음악을 만들지는 않는다 — 힉스필드의 음악 모델은 게임 파이프라인 전용이라
+  막혀 있다. 무료 음원을 받아 저 경로에 두는 것이 지금 방식이다.
+  """
+  def find_bgm(dir) do
+    ~w(mp3 wav m4a ogg)
+    |> Enum.map(&Path.join([dir, "work", "bgm.#{&1}"]))
+    |> Enum.find(&File.exists?/1)
+  end
+
+  defp probe_sec(path) do
+    case Ffmpeg.probe(path) do
+      {:ok, %{duration_sec: d}} when is_number(d) -> d
+      _ -> nil
+    end
+  end
+
+  defp has_audio?(nil), do: false
+
+  defp has_audio?(path) do
+    case System.cmd("ffprobe", ["-v", "error", "-select_streams", "a", "-show_entries",
+                                "stream=index", "-of", "csv=p=0", path], stderr_to_stdout: true) do
+      {out, 0} -> String.trim(out) != ""
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 
   # 자막 하드번. 실패해도 마스터는 남기고 진행한다 — 자막 때문에 완성본을 통째로 잃지 않는다.

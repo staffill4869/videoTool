@@ -233,16 +233,10 @@ defmodule VideoTool.Pipeline do
   # 자동 조종. 실패하면 오늘까지 쓰던 수동 방식으로 되돌아간다 —
   # Flow UI 는 바뀌게 돼 있고, 바뀌었다고 작업이 멈추면 안 된다.
   defp drive_flow(project, stage, count, text, clipboard_result) do
-    # CLEAN 은 한 편의 첫 단계다 — 늘 새 Flow 프로젝트에서 시작한다.
-    # INFO·VIDEO 는 CLEAN 이미지가 그 프로젝트 안에 있어야 하므로 열려 있는 것을 쓴다.
-    # status() 만 보면 탭이 홈으로 떠내려간 순간 매 tick 수동으로 되돌아간다 —
-    # 편집기를 여는 건 자동화가 할 수 있는 일이다. 사람을 부르는 건 로그인 화면일 때뿐.
-    ready =
-      if stage == "clean",
-        do: flow().fresh_editor(project),
-        else: flow().ensure_editor(project)
-
-    case ready do
+    # **한 편은 한 Flow 프로젝트 안에서 끝낸다.** 처음이면 열고 주소를 적어 두고,
+    # 이후 단계와 재시도는 그리로 돌아간다. 단계마다 새로 열면 앞 단계 이미지가 없어
+    # 두 프레임을 이어 붙일 수 없고, 재시도마다 빈 프로젝트가 쌓인다.
+    case flow().project_editor(project) do
       {:ok, %{flow_tab: true, prompt_box: true}} ->
         {:ok, _job} = flow().run_stage_async(project, stage, text, count)
 

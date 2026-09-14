@@ -154,6 +154,16 @@ defmodule VideoTool.Presets do
   def fetch_domain(slug), do: fetch_by_slug(DomainPreset, slug, "장르")
   def fetch_voice(slug), do: fetch_by_slug(Voice, slug, "보이스")
 
+  @doc """
+  기본 목소리를 정한다. 기본은 하나뿐이므로 나머지는 내린다.
+  """
+  def set_default_voice(%Voice{} = voice) do
+    Repo.transaction(fn ->
+      Repo.update_all(from(v in Voice, where: v.is_default), set: [is_default: false])
+      Repo.update_all(from(v in Voice, where: v.id == ^voice.id), set: [is_default: true])
+    end)
+  end
+
   defp fetch_by_slug(schema, slug, label) do
     case Repo.get_by(schema, slug: slug) do
       nil -> {:error, "#{label} 프리셋 '#{slug}' 을(를) 찾을 수 없습니다"}

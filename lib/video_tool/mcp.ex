@@ -142,7 +142,15 @@ defmodule VideoTool.MCP do
           "힉스필드 MCP 로 음성을 만든 뒤 그 결과 URL 이나 로컬 경로를 넘기세요.",
         %{
           "project_id" => int("프로젝트 id"),
-          "file" => str("음성 파일 경로 또는 http(s) URL")
+          "file" => str("음성 파일 경로 또는 http(s) URL"),
+          "scene_secs" =>
+            %{
+              "type" => "object",
+              "description" =>
+                "장면 번호 → 그 장면 음성 길이(초). 주면 장면 뒤 무음을 없애려고 " <>
+                  "클립을 그 길이로 잘라 쓴다 (마지막 장면은 통째로 남긴다). " <>
+                  "장면별 음성을 무음 없이 이어 붙였을 때만 주세요."
+            }
         },
         ["project_id", "file"]
       ),
@@ -175,6 +183,33 @@ defmodule VideoTool.MCP do
           "stage" => str("clean | info | video")
         },
         ["project_id", "stage"]
+      ),
+      tool(
+        "contact_sheet",
+        "한 단계 결과를 장면 순서대로 한 장에 붙여 준다. 그 파일을 **눈으로 보고** " <>
+          "장면 배정이 맞는지 확인한 뒤 틀렸으면 remap_scenes 로 고친다. " <>
+          "배정 신뢰도가 높아도 장면 순서는 뒤섞여 있을 수 있으므로 이 확인을 건너뛰지 말 것",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "kind" => str("clean | info | clip")
+        },
+        ["project_id", "kind"]
+      ),
+      tool(
+        "remap_scenes",
+        "장면 배정을 손으로 고친다. CLEAN 이 나오면 이미지를 눈으로 보고 순서를 확인할 것 — " <>
+          "배정 신뢰도가 높아도 장면 순서는 통째로 섞여 있을 수 있다. " <>
+          "order 는 '이 장면에 지금 몇 번 그림을 쓸지' 의 나열이다: [8,2,7,1,6,5,3,4]",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "kind" => str("clean | info | clip"),
+          "order" => %{
+            "type" => "array",
+            "items" => %{"type" => "integer"},
+            "description" => "장면 1번부터 차례로, 그 자리에 쓸 지금 장면 번호"
+          }
+        },
+        ["project_id", "kind", "order"]
       ),
       tool("settings_status", "이 PC 에서 무엇이 준비됐는지 (API 키·OAuth·ffmpeg·tesseract·Flow 브라우저)", %{}),
       tool(
@@ -218,7 +253,12 @@ defmodule VideoTool.MCP do
           "바로 돌아온다 — 진행은 next 나 flow_job 으로 확인한다",
         %{
           "project_id" => int("프로젝트 id"),
-          "stage" => str("clean | info | video. 생략하면 지금 필요한 단계")
+          "stage" => str("clean | info | video. 생략하면 지금 필요한 단계"),
+          "scene_nos" => %{
+            "type" => "array",
+            "items" => %{"type" => "integer"},
+            "description" => "만들 장면 번호. 생략하면 아직 결과가 없는 장면만 넣는다"
+          }
         },
         ["project_id"]
       ),
@@ -858,15 +898,20 @@ defmodule VideoTool.MCP do
     with {:ok, project} <- Projects.get_project(args["project_id"]),
          {:ok, stage} <- resolve_stage(project, args["stage"]),
          nil <- Jobs.running_flow_job(project.id),
-         {:ok, text} <- Prompt.render(project, stage),
-         {:ok, %{prompt_box: true}} <- Flow.status(),
-         {:ok, job} <- Flow.run_stage_async(project, stage, text, scene_count(project)) do
+         want = wanted_scenes(project, stage, args["scene_nos"]),
+         {:ok, text} <- Prompt.render(project, stage, scene_no: want),
+         # 편집기가 열려 있는지까지 볼 필요는 없다 — run_stage 가 이 편의 Flow
+         # 프로젝트를 스스로 연다. 여기서 prompt_box 를 요구하면 크롬을 새로 띄운
+         # 직후처럼 홈 화면일 때 시작조차 못 한다. 붙을 수 있고 로그인돼 있으면 된다.
+         {:ok, %{connected: true, page: page}} when page != "login" <- Flow.status(),
+         {:ok, job} <- Flow.run_stage_async(project, stage, text, length(want)) do
       %{
         ok: true,
         job_id: job.id,
         stage: stage,
+        scenes: want,
         prompt_chars: String.length(text),
-        expect: scene_count(project),
+        expect: length(want),
         message: "Flow 에 넣고 생성을 눌렀습니다. 결과가 나오면 자동으로 받아옵니다.",
         poll_after_sec: 30
       }
@@ -950,7 +995,9 @@ defmodule VideoTool.MCP do
 
       true ->
         with {:ok, project} <- Projects.get_project(args["project_id"]) do
-          case VideoTool.Assembly.save_narration(project, src) do
+          case VideoTool.Assembly.save_narration(project, src,
+                 scene_secs: normalize_secs(args["scene_secs"])
+               ) do
             {:ok, result} -> Map.put(result, :ok, true)
             {:error, reason} -> %{ok: false, error: inspect_error(reason)}
           end
@@ -976,12 +1023,30 @@ defmodule VideoTool.MCP do
     end
   end
 
+  defp handle("contact_sheet", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]),
+         {:ok, r} <- VideoTool.Sheet.build(project, args["kind"] || "clean") do
+      Map.put(r, :ok, true)
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle("remap_scenes", args) do
+    order = List.wrap(args["order"]) |> Enum.map(&trunc/1)
+
+    case Media.remap_scenes(args["project_id"], args["kind"] || "clean", order) do
+      {:ok, r} -> Map.put(r, :ok, true)
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
   defp handle("flow_harvest", args) do
     stage = args["stage"]
 
     if stage in ~w(clean info video) do
       with {:ok, project} <- Projects.get_project(args["project_id"]) do
-        case VideoTool.Flow.harvest(project, stage) do
+        case VideoTool.Flow.harvest(project, stage, []) do
           {:ok, result} -> Map.put(result, :ok, true)
           {:error, reason} -> %{ok: false, error: inspect_error(reason)}
         end
@@ -1073,6 +1138,35 @@ defmodule VideoTool.MCP do
       end)
     end)
     |> Enum.map_join("; ", fn {field, msgs} -> "#{field}: #{Enum.join(msgs, ", ")}" end)
+  end
+
+  defp normalize_secs(m) when is_map(m) and map_size(m) > 0 do
+    Map.new(m, fn {k, v} ->
+      {to_string(k), if(is_binary(v), do: String.to_float(v), else: v * 1.0)}
+    end)
+  end
+
+  defp normalize_secs(_), do: nil
+
+  # 다시 부를 때 **아직 없는 장면만** 넣는다.
+  # 8개를 통째로 다시 보내면 Flow 가 이미 있는 장면만 또 만들어 낸다 —
+  # 실측: 6개가 찬 상태로 두 번을 더 돌렸는데 새 장면은 하나도 안 들어왔다.
+  defp wanted_scenes(_project, _stage, nos) when is_list(nos) and nos != [],
+    do: Enum.map(nos, &trunc/1)
+
+  defp wanted_scenes(project, stage, _) do
+    kind = if stage == "video", do: "clip", else: stage
+
+    have =
+      Media.list_assets(project.id, kind)
+      |> Enum.filter(& &1.scene_id)
+      |> MapSet.new(& &1.scene_id)
+
+    all = Projects.scenes(project.id)
+    missing = all |> Enum.reject(&MapSet.member?(have, &1.id)) |> Enum.map(& &1.scene_no)
+
+    # 다 차 있으면 "전부 다시" 로 읽는다.
+    if missing == [], do: Enum.map(all, & &1.scene_no), else: missing
   end
 
   defp inspect_error(%Ecto.Changeset{} = cs), do: changeset_error(cs)

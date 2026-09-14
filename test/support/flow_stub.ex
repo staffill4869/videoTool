@@ -16,6 +16,7 @@ defmodule VideoTool.FlowStub do
   # 스텁에서는 편집기를 열 수 없으니 상태를 그대로 돌려준다.
   def ensure_editor(_project), do: status()
   def fresh_editor(_project), do: status()
+  def project_editor(_project), do: status()
 
   def run_stage_async(project, stage, _prompt, _expect) do
     send(self(), {:flow_started, project.id, stage})

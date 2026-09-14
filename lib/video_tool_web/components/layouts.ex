@@ -74,6 +74,11 @@ defmodule VideoToolWeb.Layouts do
               </.link>
             </li>
             <li>
+              <.link navigate={~p"/voices"} class={@active == :voices && "active font-semibold"}>
+                목소리
+              </.link>
+            </li>
+            <li>
               <.link navigate={~p"/settings"} class={@active == :settings && "active font-semibold"}>
                 설정
               </.link>
@@ -97,6 +102,7 @@ defmodule VideoToolWeb.Layouts do
             <.link navigate={~p"/series"} class="text-sm">반복</.link>
             <.link navigate={~p"/prompts"} class="text-sm">프롬프트</.link>
             <.link navigate={~p"/channels"} class="text-sm">채널</.link>
+            <.link navigate={~p"/voices"} class="text-sm">목소리</.link>
             <.link navigate={~p"/settings"} class="text-sm">설정</.link>
           </div>
         </header>

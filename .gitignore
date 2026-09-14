@@ -66,3 +66,12 @@ erl_crash.dump
 /logs/
 /.agent.lock
 lines*.json
+
+# 작업하면서 생기는 부스러기 — 대사 초안, 임시 SQL, OAuth URL
+/lines*.json
+/*.sql
+/oauth_url.txt
+/server.log
+/server.err.log
+/logs/
+/.agent.lock

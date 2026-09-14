@@ -1,18 +1,167 @@
-# VideoTool
+# videoTool
 
-To start your Phoenix server:
+세로형 해설 영상을 대본부터 완성본까지 만드는 파이프라인. Elixir/Phoenix.
 
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
+한 편은 **8초짜리 클립 8~12개**를 이어 붙인 60~90초 영상이다. 대본을 쓰고, 장면으로 나누고,
+Google Flow 로 그림과 영상을 만들고, ElevenLabs 로 나레이션을 얹고, ffmpeg 으로 합쳐서
+자막까지 구워 낸다.
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+```
+대본 → 장면 8개 → CLEAN(글자 없는 그림) → INFO(도해 얹기) → VIDEO(클립) → 나레이션 → 합성
+```
 
-Ready to run in production? Please [check our deployment guides](https://phoenix.hexdocs.pm/deployment.html).
+실제로 만든 것: 영양제·역사·고양이 3개 시리즈, 완성본 17편.
 
-## Learn more
+---
 
-* Official website: https://www.phoenixframework.org/
-* Guides: https://phoenix.hexdocs.pm/overview.html
-* Docs: https://phoenix.hexdocs.pm
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+## 설계에서 먼저 알아야 할 세 가지
+
+**1. 서버에는 LLM 이 없다.**
+말을 만드는 일(대본·장면 묘사·허용 수치)은 서버가 못 한다. 서버는 "다음에 할 일"을 내주고,
+에이전트(Claude / Codex)가 MCP 로 붙어서 그 일을 채운 뒤 저장한다.
+→ `lib/video_tool/work.ex` 의 `next_job`
+
+**2. Flow 에는 API 가 없다.**
+Google Flow 는 공개 API 가 없어서 **브라우저를 직접 조종한다.** 사람이 로그인해 둔 Chrome 에
+CDP(포트 9222)로 붙어 Playwright 로 프롬프트를 넣고 결과를 회수한다.
+자동화가 로그인을 대신하지는 않는다.
+→ `priv/flow_driver/driver.mjs`, `lib/video_tool/flow.ex`
+
+**3. 생성 API 키를 서버에 두지 않는다.**
+TTS 도 영상도 서버가 직접 부르지 않는다. 에이전트가 힉스필드 MCP 로 만들어서 파일을 넘긴다.
+서버가 하는 건 기계적인 일뿐이다 — 길이 재기, 무음 찾기, 장면에 시간 나눠주기, 붙이기.
+
+---
+
+## 화면
+
+| 경로 | 하는 일 |
+|---|---|
+| `/projects` | 프로젝트 목록·진행 상태 |
+| `/series` | 반복 제작 설정 (주제 브리프, 상시 프롬프트, 간격) |
+| `/prompts` | 단계별 프롬프트와 그림체 프리셋 |
+| `/voices` | 나레이션 목소리 113개 미리듣기·선택 |
+| `/channels` | 유튜브·인스타 연결 |
+| `/settings` | 이 PC 에 뭐가 준비됐는지 |
+
+조작은 화면이 아니라 **MCP 도구**로 한다. 화면은 결과를 눈으로 보는 곳이다.
+
+---
+
+## 준비물
+
+| | 확인 |
+|---|---|
+| Elixir / Erlang | `mix --version` |
+| PostgreSQL | DB `video_tool_dev` |
+| ffmpeg · ffprobe | `ffmpeg -version` |
+| Node | `priv/flow_driver` 의 playwright-core |
+| Chrome | Flow 조종용, 디버그 포트 9222 |
+| tesseract (kor) | 허용 수치 검증용 (선택) |
+
+```bash
+mix setup                       # deps · DB · 시드
+mix run priv/repo/sync_prompts.exs   # priv/prompts/*.txt → DB
+.\restart.ps1                   # 서버 (포트 4300)
+.\launch-chrome.ps1             # Flow 용 Chrome → 그 창에서 구글 로그인
+```
+
+**저장소에 없는 것** (`.gitignore`):
+`.env`(DB·OAuth 클라이언트), `.credentials/`(DPAPI 로 암호화한 토큰),
+`.chrome-profile/`(로그인 세션), `projects/`(만든 영상과 중간 산출물).
+
+---
+
+## 한 편 만드는 순서 (실측 27분)
+
+```
+1. run_series            대본 · 장면 8개 · 허용 수치         5분
+2. flow_generate(clean)  글자 없는 장면 그림 8장             3분
+3. contact_sheet(clean)  ← 눈으로 보고 remap_scenes 로 교정   3분
+4. flow_generate(info)   도해를 얹은 그림 8장                3분
+5. flow_generate(video)  CLEAN→INFO 보간 클립 8개           15분
+6. 힉스필드 TTS          장면별 음성 → work/tts/sNN.mp3
+7. finish-video.ps1      정렬 · 자막 · 합성 → final.mp4
+```
+
+3번을 건너뛰지 말 것. 아래 "함정" 참고.
+
+---
+
+## 정렬 — 이 프로젝트에서 가장 오래 걸린 문제
+
+통짜 나레이션 하나를 클립 묶음에 얹으면 **원리상 안 맞는다.** 영상은 클립 누적(0-8, 8-16…)
+으로 가는데 자막은 글자 수 비례로 나뉘어(0-6.0, 6.0-11.1…) 네 번째 장면에서 9초까지 벌어졌다.
+
+지금 방식:
+
+- **장면마다 따로** TTS 를 만든다
+- **무음으로 채우지 않는다.** 음성을 그대로 두고 **화면을 음성 길이로 자른다**
+- **앞을 자른다.** 클립의 마지막 프레임이 그 장면의 결론(도해가 다 얹힌 그림)이라
+  뒤를 자르면 하려던 말을 끝내기 직전에 끊는다
+- 대사 뒤에 **0.3초**를 남긴다. 딱 붙이면 다음 장면이 바로 시작돼 딱딱하다
+- **마지막 장면만** 클립을 통째로 쓴다 (끝맺음 여운)
+
+대본은 클립 길이에 맞춰 쓴다 — ElevenLabs 한국어 **초당 5.0자**(공백 제외), 8초면 38~42자.
+짧게 쓰면 만든 영상을 그만큼 버린다. 낭독 속도로 길이를 맞추지 않는다.
+
+→ `lib/video_tool/assembly.ex`, `finish-video.ps1`
+
+---
+
+## 함정 (전부 실측으로 겪은 것)
+
+**장면 순서는 자동으로 안 맞는다.** dHash 배정은 "클립이 자기 이미지와 맞는가"만 본다.
+그 이미지가 몇 번 장면인지는 모른다. 배정 신뢰도 0.99 여도 순서는 통째로 뒤섞여 있을 수 있다.
+`contact_sheet` 로 한 장에 늘어놓고 눈으로 본 뒤 `remap_scenes` 로 고친다.
+
+**콘텐츠 필터가 조용히 소재를 바꿔치기한다.** 오류를 내지 않는다.
+"로마 군단의 붉은 망토 행렬" 이 미국 서부 개척시대 포장마차로 나왔다.
+종이 디오라마 화풍에서 인물·군대를 쓰지 말 것.
+
+**Flow 는 한 번에 다 주지 않는다.** 12장면이면 3~4라운드가 필요하다.
+재시도할 때는 **아직 없는 장면만** 넣는다 — 전부 다시 보내면 이미 있는 것만 또 만든다.
+
+**한 편당 Flow 프로젝트 하나.** 남의 탭에 붙여넣으면 그 대화에 있던 이미지가 섞인다.
+실제로 32·33번 생성물이 31번 창에 들어가 남의 이미지가 자산으로 등록됐다.
+
+**`apad` 와 `-t` 는 한 쌍이다.** `apad` 만 쓰면 출력이 끝나지 않는다 (9분간 파일이 자랐다).
+
+**`-filter:v` 와 `-vf` 는 같은 옵션이다.** 따로 주면 뒤엣것이 덮어써서 배속이 조용히 사라진다.
+
+**리타이밍에 `-an` 을 붙이지 말 것.** Flow 가 만든 효과음이 통째로 사라진다.
+
+**INFO 프롬프트에서 "자막 자리를 비워라" 라고만 쓰지 말 것.** 생성기가 글자가 아니라
+**그림을 비운다.** 화면 아래 40%가 빈 회색 판으로 나왔다. "그림은 네 변까지 채우고,
+비우는 건 글자" 로 나눠서 적어야 한다.
+
+더 많은 규칙은 `CLAUDE.md`(에이전트용 상시 지시)와 `AGENTS.md` 에 있다.
+
+---
+
+## 발행
+
+**자동으로 나가지 않는다.** `publish` 는 `confirm: true` 없이는 실행되지 않고,
+에이전트 권한 파일에서도 거부 목록에 있다. 되돌릴 수 없는 공개 행위라 사람이 누를 때만 나간다.
+
+토큰은 DB 가 아니라 Windows DPAPI 로 암호화해 `.credentials/` 에 둔다.
+OAuth 동의 화면이 "테스트" 상태면 refresh token 이 **7일** 만에 만료된다 — 프로덕션으로 게시할 것.
+
+---
+
+## 구조
+
+```
+lib/video_tool/
+  work.ex        다음에 할 일을 내준다 (서버에 LLM 이 없어서 생긴 구조)
+  series.ex      반복 제작. 주기마다 프로젝트를 만든다
+  prompt.ex      단계별 프롬프트 조립 (프리셋 · 변수 · 장면)
+  flow.ex        Flow 조종 · 결과 회수
+  mapping.ex     dHash/pHash 로 결과를 장면에 배정
+  sheet.ex       콘택트 시트 — 배정을 눈으로 확인하는 용도
+  assembly.ex    나레이션 정렬 · 리타이밍 · 합성 · 자막
+  publishing.ex  유튜브 · 인스타
+priv/
+  prompts/       clean.txt · info.txt · video.txt (파일이 원본, DB 는 사본)
+  flow_driver/   Playwright 로 Chrome 을 조종하는 Node 스크립트
+```

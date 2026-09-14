@@ -13,7 +13,7 @@ defmodule VideoTool.Flow do
 
   require Logger
 
-  alias VideoTool.{Ffmpeg, Jobs, Mapping, Media, Phash}
+  alias VideoTool.{Ffmpeg, Jobs, Mapping, Media, Phash, Series}
 
   @default_timeout 30_000
 
@@ -95,15 +95,41 @@ defmodule VideoTool.Flow do
         "가로로 만든다. 세로로 만들지 않는다. 좌우로 넓게 쓰고 여백은 한쪽에 몰아 둔다."
       end
 
-    """
+    base = """
     모든 이미지와 영상은 반드시 #{aspect} 비율로 만든다. #{orientation}
-    화면 아래 20퍼센트에는 나중에 자막이 얹히므로 글자나 핵심 대상을 두지 않는다.
+    화면 아래 20퍼센트에는 나중에 자막이 얹히므로 글자를 두지 않는다.
+    다만 그림 자체는 네 변까지 꽉 채운다 — 아래를 비우거나 빈 띠를 깔지 않는다.
     요청한 장면 수를 그대로 지킨다. 임의로 늘리거나 줄이지 않는다.
     일부가 실패하면 실패한 것만 다시 만들어 요청한 개수를 채운다.
     요청한 것만 하고 멈춘다. 다음 단계를 스스로 제안하거나 이어서 하지 않는다 —
     이미지를 만들라고 하면 이미지까지, 영상을 만들라고 할 때만 영상을 만든다.
+
+    소리는 **장면에서 실제로 날 법한 효과음만** 넣는다.
+    말소리, 대사, 나레이션, 사람 목소리를 넣지 말라 — 나레이션은 따로 얹는다.
+    배경 음악, 브금, 악기 연주도 넣지 말라. 음악은 나중에 따로 깐다.
     """
+
+    # 시리즈 상시 지시를 여기에 얹는다. **고정 캐릭터가 사는 자리다** —
+    # 장면 프롬프트에만 적으면 편마다 생김새가 흔들린다. 상시 지시는 그 Flow
+    # 프로젝트의 모든 생성에 걸리므로 같은 얼굴이 계속 나온다.
+    case standing(project) do
+      nil -> base
+      extra -> base <> "
+" <> extra
+    end
   end
+
+  defp standing(%{series_id: id}) when not is_nil(id) do
+    case Series.get(id) do
+      {:ok, %{standing_prompt: p}} when is_binary(p) ->
+        if String.trim(p) == "", do: nil, else: String.trim(p)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp standing(_), do: nil
 
   @doc """
   프롬프트를 넣을 수 있는 상태인지 확인하고, 아니면 만든다.
@@ -139,6 +165,55 @@ defmodule VideoTool.Flow do
   """
   def fresh_editor(project) do
     with {:ok, _} <- open_for(project), do: status()
+  end
+
+  @doc """
+  이 프로젝트 전용 Flow 프로젝트를 연다. **한 편은 한 Flow 프로젝트 안에서 끝낸다.**
+
+  처음이면 새로 열고 그 주소를 프로젝트에 적어 둔다. 이미 있으면 그리로 간다.
+  단계마다 새로 열면 앞 단계 이미지가 없어 두 프레임을 이어 붙일 수 없고,
+  재시도할 때마다 빈 Flow 프로젝트가 쌓인다 — 실제로 우수수 생겼다.
+  """
+  def project_editor(project) do
+    case saved_url(project) do
+      nil ->
+        with {:ok, _} <- open_for(project),
+             {:ok, st} <- status() do
+          remember_url(project, st[:url])
+          {:ok, st}
+        end
+
+      url ->
+        with {:ok, _} <- run(%{action: "open_url", url: url}, 90_000),
+             {:ok, st} <- status() do
+          # 저장해 둔 주소가 죽었으면(삭제·권한 변경) 새로 연다.
+          if st[:prompt_box], do: {:ok, st}, else: forget_and_reopen(project)
+        else
+          _ -> forget_and_reopen(project)
+        end
+    end
+  end
+
+  defp forget_and_reopen(project) do
+    Logger.warning("저장된 Flow 프로젝트로 못 갔습니다. 새로 엽니다 (프로젝트 #{project.id})")
+    remember_url(project, nil)
+
+    with {:ok, _} <- open_for(project), {:ok, st} <- status() do
+      remember_url(project, st[:url])
+      {:ok, st}
+    end
+  end
+
+  defp saved_url(project) do
+    case get_in(project.variables || %{}, ["flow_url"]) do
+      u when is_binary(u) and u != "" -> u
+      _ -> nil
+    end
+  end
+
+  defp remember_url(project, url) do
+    vars = Map.put(project.variables || %{}, "flow_url", url)
+    VideoTool.Projects.update_project(project, %{"variables" => vars})
   end
 
   @doc "Chrome 에 붙을 수 있는지, Flow 탭이 열려 있는지."
@@ -179,10 +254,12 @@ defmodule VideoTool.Flow do
   배정은 `Mapping` 이 한다 — CLEAN 은 순서대로, INFO 는 CLEAN 과 닮은 정도로,
   클립은 첫 프레임이 CLEAN 과 끝 프레임이 INFO 와 닮았는지로 (by_chain).
   """
-  def harvest(project, stage) do
+  def harvest(project, stage, exclude) do
     kind = asset_kind(stage)
     dir = Path.join(project.work_dir, "incoming")
-    known = known_flow_ids(project.id)
+    # 이미 등록한 것 + **생성 전에 화면에 있던 것**. 뒤엣것을 빼지 않으면
+    # 다른 프로젝트 이미지를 우리 것으로 등록한다 (실측: INFO 에서 6장 섞임).
+    known = known_flow_ids(project.id, kind) ++ List.wrap(exclude)
 
     with {:ok, %{files: files}} <-
            run(%{action: "harvest", dir: dir, kind: media_kind(kind), known: known}, 300_000) do
@@ -213,8 +290,14 @@ defmodule VideoTool.Flow do
   defp media_kind(_), do: "image"
 
   # 같은 걸 두 번 등록하지 않는다. Flow 가 준 식별자를 source_filename 에 남겨 대조한다.
-  defp known_flow_ids(project_id) do
-    ~w(clean info clip)
+  # **같은 종류 안에서만** 이미 아는 것으로 친다.
+  # Flow 는 포스터 이미지와 그 이미지로 만든 영상에 **같은 UUID** 를 쓴다
+  # (`/image/<id>` 와 `/video/<id>`). 종류를 섞어 걸러내면 INFO 이미지를 등록한 순간
+  # 그 이미지로 만든 클립이 "이미 아는 것" 이 되어 한 개도 못 가져온다 — 실제로 8개를 놓쳤다.
+  defp known_flow_ids(project_id, kind) do
+    same = if kind == "clip", do: ["clip"], else: ["clean", "info"]
+
+    same
     |> Enum.flat_map(&Media.list_assets(project_id, &1))
     |> Enum.map(& &1.source_filename)
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -312,23 +395,37 @@ defmodule VideoTool.Flow do
 
   defp run_stage(job, project, stage, prompt, expect) do
     result =
-      with {:ok, started} <- paste_and_generate(prompt) do
+      # **먼저 이 편의 Flow 프로젝트로 간다.** 이걸 빼면 지금 열려 있는 아무 창에나
+      # 프롬프트를 붙여넣는다 — 실측: 32·33번이 31번 창에 들어가 31번 이미지가
+      # 33번 자산으로 등록됐다. 한 편당 Flow 프로젝트 하나가 원칙이다.
+      with {:ok, _} <- project_editor(project),
+           {:ok, started} <- paste_and_generate(prompt) do
         since = started[:results_before] || 0
-        collect(project, stage, expect, since, @harvest_rounds, 0)
+        before = started[:ids_before] || []
+        collect(project, stage, expect, since, before, @harvest_rounds, 0)
       end
 
     finish(job, result)
   end
 
-  defp collect(project, stage, expect, since, rounds_left, got) do
-    with {:ok, _} <- wait_results(expect - got, since: since, stage: stage),
-         {:ok, harvested} <- harvest(project, stage) do
-      got = got + (harvested[:new] || 0)
+  # 대기가 시간 초과로 끝나도 **화면에는 결과가 와 있을 수 있다.**
+  # 실측: 영상 8개가 전부 나왔는데 900초를 넘겨 작업이 failed 로 찍히고 회수를 못 해,
+  # 클립이 다 있는 프로젝트가 완성본 없이 남았다. 그래서 먼저 회수하고 나서 판단한다.
+  defp collect(project, stage, expect, since, before, rounds_left, got) do
+    waited = wait_results(expect - got, since: since, stage: stage)
+
+    with {:ok, harvested} <- harvest(project, stage, before) do
+      new = harvested[:new] || 0
+      got = got + new
+      timed_out? = match?({:error, _}, waited)
 
       cond do
         got >= expect -> {:ok, harvested}
-        rounds_left <= 1 -> {:ok, harvested}
-        true -> collect(project, stage, expect, since, rounds_left - 1, got)
+        # 하나라도 건졌으면 성과로 친다. 못 건졌고 대기까지 실패면 그 이유를 그대로 올린다.
+        rounds_left <= 1 -> if got > 0, do: {:ok, harvested}, else: waited
+        # 시간 초과인데 새로 들어온 것도 없다 — 더 기다려도 같다.
+        timed_out? and new == 0 -> waited
+        true -> collect(project, stage, expect, since, before, rounds_left - 1, got)
       end
     end
   end

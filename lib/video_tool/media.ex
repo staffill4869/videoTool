@@ -160,6 +160,56 @@ defmodule VideoTool.Media do
     )
   end
 
+  @doc """
+  장면 배정을 손으로 고친다.
+
+  CLEAN 이 나오면 **이미지를 눈으로 봐야 한다.** dHash 배정은 "클립이 자기 이미지와
+  맞는다" 는 뜻일 뿐이라, 장면 순서가 통째로 뒤섞여도 신뢰도는 높게 나온다
+  (실측: 프로젝트 21·17·30·31 전부 섞였다).
+
+  `order` 는 지금 자리(장면 번호) 의 나열이다. `[8, 2, 7, 1, 6, 5, 3, 4]` 는
+  "1번 장면에는 지금 8번에 있는 그림을 써라" 는 뜻 — 콘택트 시트를 보면서 읽는 순서 그대로다.
+  """
+  def remap_scenes(project_id, kind, order) do
+    assets = list_assets(project_id, kind) |> Enum.filter(& &1.scene_id)
+    by_no = Map.new(assets, &{&1.scene.scene_no, &1})
+    scenes = Map.new(assets, &{&1.scene.scene_no, &1.scene_id})
+    n = map_size(by_no)
+
+    cond do
+      map_size(scenes) != length(assets) ->
+        {:error, "한 장면에 #{kind} 자산이 여러 개입니다. 먼저 정리하세요."}
+
+      length(order) != n ->
+        {:error, "장면은 #{n}개인데 순서는 #{length(order)}개입니다."}
+
+      Enum.sort(order) != Enum.sort(Map.keys(by_no)) ->
+        {:error, "순서는 장면 번호를 한 번씩 전부 써야 합니다: #{inspect(Map.keys(by_no))}"}
+
+      true ->
+        {:ok, _} =
+          Repo.transaction(fn ->
+            # 장면 id 는 유일해야 하므로 한 번 떼었다 다시 붙인다.
+            # 떼어낸 **그 구조체**를 다시 써야 한다. 원본 구조체에는 옛 scene_id 가 남아 있어
+            # 제자리(1→1) 인 것은 Ecto 가 "바뀐 게 없다" 며 건너뛰고 nil 인 채로 둔다.
+            nulled =
+              Map.new(assets, fn a ->
+                {a.scene.scene_no, Repo.update!(Ecto.Changeset.change(a, scene_id: nil))}
+              end)
+
+            order
+            |> Enum.with_index(1)
+            |> Enum.each(fn {from, to} ->
+              Repo.update!(
+                Ecto.Changeset.change(nulled[from], scene_id: scenes[to], order_confidence: 1.0)
+              )
+            end)
+          end)
+
+        {:ok, %{moved: Enum.count(Enum.with_index(order, 1), fn {f, t} -> f != t end), scenes: n}}
+    end
+  end
+
   @doc "단계별 개수. next/1 이 어디까지 왔는지 판단하는 근거."
   def asset_counts(project_id) do
     from(a in Asset,
