@@ -359,11 +359,25 @@ defmodule VideoTool.Series do
     series |> Ecto.Changeset.change(attrs) |> Repo.update()
   end
 
-  @doc "아직 대본이 없는(=에이전트가 손 안 댄) 이 시리즈의 프로젝트 수."
+  @doc """
+  아직 안 끝난 편의 수. 상한(`max_pending`)이 이 숫자를 본다.
+
+  **`draft` 만 세면 안 된다.** 대본은 몇 분이면 써지고 그 순간 `scripted` 로 넘어가는데,
+  거기서 끝난 게 아니다 — 그림 8장과 클립 8개가 남아 있고 그건 30분이 걸린다.
+  draft 만 세다가 늘 0~1 로 나와서, 다섯 편이 이미지도 없이 서 있는데 한 시간마다
+  새 편을 계속 찍어냈다.
+
+  그렇다고 `status` 로도 셀 수 없다 — **`scened` 에서 더 올라가지 않는다.** 이미 발행까지
+  끝난 편도 `scened` 로 남아 있어서, 상태로 세면 상한에 걸려 영영 안 만든다.
+  판정 기준은 **완성본(render)이 있느냐** 하나다.
+  """
   def pending_count(series_id) do
     Repo.one(
       from p in Project,
-        where: p.series_id == ^series_id and p.status == "draft",
+        as: :p,
+        where:
+          p.series_id == ^series_id and
+            not exists(from r in "renders", where: r.project_id == parent_as(:p).id, select: 1),
         select: count(p.id)
     )
   end
