@@ -106,11 +106,22 @@ defmodule VideoTool.Assembly do
   여기서는 각 장면의 화면 길이를 **그 장면 나레이션 길이**로 잡아 뒤를 잘라내고,
   **마지막 장면만 클립을 통째로** 남긴다 (끝맺음 여운은 있어야 한다).
 
-  `scene_secs` 는 장면 번호 → 그 장면 음성 길이(초). 없으면 nil 을 돌려
-  기존 방식(클립 길이 = 장면 길이)으로 떨어진다.
+  `scene_secs` 는 장면 번호 → 그 장면 음성 길이(초).
+
+  **안 넘겨주면 디스크에서 직접 잰다.** 예전에는 조용히 `clip_timing`(장면마다 클립 길이
+  = 8초)으로 떨어졌는데, 실제 대사는 6.1~8.9초로 들쭉날쭉해서 장면마다 최대 0.9초씩 밀리고
+  그게 **누적된다** — 실측(55번): 5번 장면에서 음성이 화면보다 2.3초 앞서 갔고 그대로 발행됐다.
+  장면별 음성은 `work/tts/s01.mp3` 규칙으로 이미 디스크에 있다. 안 넘겨줬다고 틀린 시간표를
+  쓰느니 파일을 재는 게 맞다.
   """
-  def narration_timing(_project, nil), do: nil
-  def narration_timing(_project, secs) when secs == %{}, do: nil
+  def narration_timing(project, nil) do
+    case measure_scene_tts(project) do
+      nil -> nil
+      secs -> narration_timing(project, secs)
+    end
+  end
+
+  def narration_timing(project, secs) when secs == %{}, do: narration_timing(project, nil)
 
   def narration_timing(project, secs) when is_map(secs) do
     scenes = Projects.scenes(project.id)
@@ -137,6 +148,32 @@ defmodule VideoTool.Assembly do
         end)
 
       rows
+    end
+  end
+
+  # 장면별 TTS 는 work/tts/s01.mp3 규칙으로 떨어져 있다. 부르는 쪽이 길이를 안 넘겨주면
+  # 여기서 직접 잰다 — 안 넘겨줬다는 이유로 틀린 시간표를 쓰는 것보다 낫다.
+  defp measure_scene_tts(project) do
+    dir = Path.join([work_dir(project), "work", "tts"])
+
+    case Path.wildcard(Path.join(dir, "s*.mp3")) ++ Path.wildcard(Path.join(dir, "s*.wav")) do
+      [] ->
+        nil
+
+      files ->
+        files
+        |> Enum.flat_map(fn f ->
+          with [_, no] <- Regex.run(~r/s(\d+)\./, Path.basename(f)),
+               {:ok, d} <- Ffmpeg.duration(f) do
+            [{no, d}]
+          else
+            _ -> []
+          end
+        end)
+        |> case do
+          [] -> nil
+          pairs -> Map.new(pairs)
+        end
     end
   end
 
