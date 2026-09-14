@@ -394,6 +394,11 @@ defmodule VideoTool.MCP do
   # ── 디스패치 ────────────────────────────────────────────────────
 
   def call(name, args) do
+    # 누가 몰고 있는지와 무관하게 **활동 흔적을 남긴다.**
+    # 예전에는 잠금 파일(run-agent.ps1 전용)로만 "작업 중" 을 판단해서,
+    # Cowork 나 다른 클라이언트가 일하고 있어도 화면에는 "쉬는 중" 으로 보였다.
+    # 서버에 들어오는 호출은 누가 불렀든 다 여기를 지난다.
+    VideoTool.Activity.record(name)
     handle(name, args || %{})
   rescue
     e -> %{ok: false, error: "#{name} 실행 중 오류: #{Exception.message(e)}"}

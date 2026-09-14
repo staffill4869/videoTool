@@ -35,12 +35,17 @@ defmodule VideoToolWeb.AgentLive do
   # PowerShell·HTTP 를 타는 것들은 따로 돌린다. 5초마다 부르면 화면이 버벅인다.
   defp load_shell(socket) do
     snap = AgentStatus.snapshot()
-    assign(socket, shell: Map.take(snap, [:task, :running, :chrome, :log]))
+    assign(socket, shell: Map.take(snap, [:task, :running, :chrome, :log, :activity]))
   end
 
   @impl true
   def handle_info(:tick, socket), do: {:noreply, load(socket)}
   def handle_info(:tick_slow, socket), do: {:noreply, load_shell(socket)}
+
+  defp ago(nil), do: "?"
+  defp ago(sec) when sec < 60, do: "#{sec}초 전"
+  defp ago(sec) when sec < 3600, do: "#{div(sec, 60)}분 전"
+  defp ago(sec), do: "#{div(sec, 3600)}시간 전"
 
   defp dot(true), do: "bg-success"
   defp dot(false), do: "bg-error"
@@ -82,16 +87,19 @@ defmodule VideoToolWeb.AgentLive do
           <div class="rounded-lg border border-base-300 p-3">
             <div class="text-xs text-base-content/60">지금 돌고 있나</div>
             <div class="mt-1 flex items-center gap-2">
-              <span class={["inline-block h-2.5 w-2.5 rounded-full", dot(@shell.running[:running])]}></span>
+              <span class={["inline-block h-2.5 w-2.5 rounded-full", dot(@shell.activity[:working?])]}></span>
               <span class="font-semibold">
-                {if @shell.running[:running], do: "작업 중", else: "쉬는 중"}
+                {if @shell.activity[:working?], do: "작업 중", else: "조용함"}
               </span>
             </div>
-            <div :if={@shell.running[:running]} class="mt-1 text-xs text-base-content/60">
-              {@shell.running[:since_min]}분째
+            <div :if={@shell.activity[:last_active]} class="mt-1 font-mono text-[11px] text-base-content/60">
+              {@shell.activity.last_active["tool"]} · {ago(@shell.activity.last_active["ago_sec"])}
             </div>
-            <div :if={@shell.running[:stale]} class="mt-1 text-xs text-warning">
-              1시간 넘게 잠겨 있습니다 — 죽은 잠금일 수 있습니다
+            <div :if={!@shell.activity[:last_active]} class="mt-1 text-xs text-base-content/50">
+              아직 호출 기록 없음
+            </div>
+            <div :if={@shell.running[:running]} class="mt-1 text-[11px] text-base-content/50">
+              Windows 루프도 도는 중 ({@shell.running[:since_min]}분째)
             </div>
           </div>
 
@@ -165,6 +173,23 @@ defmodule VideoToolWeb.AgentLive do
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div :if={@shell && @shell.activity[:recent] not in [nil, []]} class="rounded-lg border border-base-300 p-3">
+          <div class="mb-2 text-xs text-base-content/60">최근 도구 호출 — 누가 몰든 여기에 남습니다</div>
+          <div class="flex flex-wrap gap-1">
+            <span
+              :for={e <- Enum.take(@shell.activity.recent, 12)}
+              class={[
+                "rounded px-1.5 py-0.5 font-mono text-[11px]",
+                e["active"] && "bg-primary/15 text-primary",
+                !e["active"] && "bg-base-300 text-base-content/50"
+              ]}
+              title={e["at"]}
+            >
+              {e["tool"]} · {ago(e["ago_sec"])}
+            </span>
+          </div>
         </div>
 
         <div :if={@shell && @shell.log != []} class="rounded-lg border border-base-300 p-3">

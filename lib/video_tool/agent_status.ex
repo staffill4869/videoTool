@@ -20,6 +20,9 @@ defmodule VideoTool.AgentStatus do
     %{
       task: scheduled_task(),
       running: running(),
+      # 잠금 파일은 run-agent.ps1 만 만든다. Cowork 든 사람이 붙은 Claude Code 든
+      # 서버를 몰면 도구 호출이 남으므로, 이쪽이 누가 몰든 잡히는 신호다.
+      activity: VideoTool.Activity.summary(),
       chrome: chrome(),
       log: last_log_lines(6),
       projects: projects()
