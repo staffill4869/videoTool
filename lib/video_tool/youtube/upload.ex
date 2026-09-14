@@ -130,24 +130,41 @@ defmodule VideoTool.YouTube.Upload do
 
   # ── 섬네일 · 자막 ───────────────────────────────────────────────
 
-  defp maybe_thumbnail(_token, _video_id, %{thumbnail_path: ""}), do: %{ok: false, reason: "섬네일 없음"}
-
   defp maybe_thumbnail(token, video_id, render) do
-    if File.exists?(render.thumbnail_path) do
-      headers = [{"authorization", "Bearer " <> token}, {"content-type", "image/png"}]
+    case thumbnail_file(render) do
+      nil ->
+        %{ok: false, reason: "섬네일 없음"}
 
-      case Req.post(@thumbnail_url,
-             params: [videoId: video_id],
-             headers: headers,
-             body: File.read!(render.thumbnail_path),
-             receive_timeout: 60_000
-           ) do
-        {:ok, %{status: 200}} -> %{ok: true}
-        {:ok, %{status: status, body: body}} -> %{ok: false, reason: "#{status}: #{describe(body)}"}
-        {:error, reason} -> %{ok: false, reason: inspect(reason)}
-      end
-    else
-      %{ok: false, reason: "섬네일 파일이 없습니다"}
+      path ->
+        headers = [{"authorization", "Bearer " <> token}, {"content-type", image_type(path)}]
+
+        case Req.post(@thumbnail_url,
+               params: [videoId: video_id],
+               headers: headers,
+               body: File.read!(path),
+               receive_timeout: 60_000
+             ) do
+          {:ok, %{status: 200}} -> %{ok: true}
+          {:ok, %{status: status, body: body}} -> %{ok: false, reason: "#{status}: #{describe(body)}"}
+          {:error, reason} -> %{ok: false, reason: inspect(reason)}
+        end
+    end
+  end
+
+  # 등록된 경로가 먼저다. 없으면 프로젝트 폴더에 떨어뜨려 둔 파일을 줍는다 —
+  # 섬네일을 그려 놓고 save_thumbnail 을 안 불러서 "섬네일 없음" 으로 올라간 적이 있다.
+  # 파일이 거기 있는데 이름을 안 알려줬다는 이유로 안 올리는 건 도움이 안 된다.
+  defp thumbnail_file(render) do
+    registered = if render.thumbnail_path != "", do: render.thumbnail_path
+
+    [registered | Path.wildcard("projects/#{render.project_id}/{thumb,thumbnail}.{jpg,jpeg,png}")]
+    |> Enum.find(&(is_binary(&1) and File.exists?(&1)))
+  end
+
+  defp image_type(path) do
+    case path |> Path.extname() |> String.downcase() do
+      ".png" -> "image/png"
+      _ -> "image/jpeg"
     end
   end
 

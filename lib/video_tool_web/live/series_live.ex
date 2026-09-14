@@ -138,6 +138,22 @@ defmodule VideoToolWeb.SeriesLive do
     {:noreply, socket |> put_flash(:info, "#{channel.display_name} 연결을 끊었습니다") |> load()}
   end
 
+  # 공개 여부는 **채널 설정**이 정한다. 프롬프트가 아니다 —
+  # 무인 루프가 privacy: "public" 을 넣어도 채널이 비공개면 코드가 무시한다.
+  # 그래서 공개로 내보내려면 사람이 여기를 눌러야 한다.
+  def handle_event("toggle_privacy", %{"slug" => slug}, socket) do
+    {:ok, channel} = Publishing.fetch_channel(slug)
+    next = if channel.default_privacy == "public", do: "private", else: "public"
+    {:ok, _} = Publishing.update_channel(channel, %{default_privacy: next})
+
+    message =
+      if next == "public",
+        do: "#{channel.display_name} — 이제 **공개**로 올라갑니다. 만드는 즉시 누구나 볼 수 있습니다.",
+        else: "#{channel.display_name} — 비공개로 되돌렸습니다."
+
+    {:noreply, socket |> put_flash(:info, message) |> load()}
+  end
+
   defp normalize(params) do
     params
     |> Map.take(~w(name topic_brief standing_prompt aspect target_sec pipeline output_folder
@@ -401,6 +417,22 @@ defmodule VideoToolWeb.SeriesLive do
       <div :if={@c.usable and @c.account != ""} class="mt-1 truncate text-xs opacity-70">
         {@c.account_title}
       </div>
+
+      <button
+        :if={@c.usable}
+        phx-click="toggle_privacy"
+        phx-value-slug={@c.row.slug}
+        data-confirm={
+          @c.row.default_privacy != "public" &&
+            "이제부터 이 채널에 올라가는 영상이 바로 공개됩니다. 사람이 보기 전에 나갑니다."
+        }
+        class={[
+          "badge badge-sm mt-1",
+          (@c.row.default_privacy == "public" && "badge-warning") || "badge-ghost"
+        ]}
+      >
+        {(@c.row.default_privacy == "public" && "공개로 올림") || "비공개로 올림"}
+      </button>
 
       <div :if={@c.locked_by} class="mt-1 text-xs opacity-60">
         이 시리즈는 '{@c.locked_by.display_name}' 로 나갑니다. 둘 중 하나만 고릅니다.
