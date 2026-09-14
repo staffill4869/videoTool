@@ -150,6 +150,45 @@ defmodule VideoTool.Presets do
   def list_templates,
     do: Repo.all(from t in PromptTemplate, where: t.is_active, order_by: [t.stage, t.version])
 
+  @doc """
+  이 그림체가 어떻게 생겼는지 보여줄 예시 사진의 주소. 없으면 nil.
+
+  글로만 고르면 "종이 디오라마" 와 "빈티지 콜라주" 가 뭐가 다른지 알 수 없다.
+  `style-examples/` 에 같은 주제를 열세 가지로 그려 둔 세트가 있어서 그걸 붙여 준다.
+  파일명이 아니라 **이름으로** 맞춘다 — 번호는 나중에 바뀐다.
+  """
+  @style_examples %{
+    "2D 플랫 모션그래픽" => "01-2d-flat-motion.png",
+    "3D 인포그래픽 다큐" => "02-3d-infographic-documentary.png",
+    "infographic-3d" => "03-infographic-3d.png",
+    "미니어처 틸트시프트" => "04-miniature-tilt-shift.png",
+    "블루프린트 도면" => "05-blueprint.png",
+    "빈티지 콜라주" => "06-vintage-collage.png",
+    "손그림 노트" => "07-handdrawn-notebook.png",
+    "시네마틱 3D 다큐" => "08-cinematic-3d-documentary.png",
+    "실사 다큐" => "09-live-documentary.png",
+    "아이소메트릭 로우폴리" => "10-isometric-lowpoly.png",
+    "웹툰 셀 애니" => "11-webtoon-cel-animation.png",
+    "종이 디오라마" => "12-paper-diorama.png",
+    "클레이 스톱모션" => "13-clay-stopmotion.png"
+  }
+
+  def style_example(name) when is_binary(name) do
+    case @style_examples[String.trim(name)] do
+      nil -> nil
+      file -> "/style-examples/#{file}"
+    end
+  end
+
+  def style_example(_), do: nil
+
+  @doc "예시 사진이 있는 그림체 이름들. 고르는 화면이 이 순서로 늘어놓는다."
+  def styles_with_examples do
+    @style_examples
+    |> Enum.map(fn {name, file} -> %{name: name, url: "/style-examples/#{file}"} end)
+    |> Enum.sort_by(& &1.url)
+  end
+
   def fetch_style(slug), do: fetch_by_slug(StylePreset, slug, "그림체")
   def fetch_domain(slug), do: fetch_by_slug(DomainPreset, slug, "장르")
   def fetch_voice(slug), do: fetch_by_slug(Voice, slug, "보이스")

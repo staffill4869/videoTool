@@ -76,7 +76,8 @@ defmodule VideoTool.Publishing.GoogleOAuth do
     with {:ok, channel_slug} <- verify_state(state),
          {:ok, channel} <- Publishing.fetch_channel(channel_slug),
          {:ok, tokens} <- exchange(code),
-         {:ok, updated} <- store(channel, tokens) do
+         {:ok, updated} <- store(channel, tokens),
+         {:ok, updated} <- reject_duplicate(updated) do
       {:ok, updated}
     end
   end
@@ -123,38 +124,83 @@ defmodule VideoTool.Publishing.GoogleOAuth do
         |> DateTime.add(tokens["expires_in"] || 3600, :second)
         |> DateTime.truncate(:second)
 
-      # 어느 유튜브 채널에 붙었는지 바로 확인해서 적어 둔다.
-      # 토큰은 **동의할 때 고른 채널**에 묶인다. 그런데 화면에는 우리가 붙인 이름만
-      # 보여서, 발행 채널 셋이 실수로 같은 유튜브 채널을 가리켜도 알 수가 없었다.
-      # 실패해도 연결 자체는 성공이므로 막지 않는다.
-      Publishing.update_channel(channel, %{token_expires_at: expires_at})
-      |> tap(fn _ -> identify(channel, tokens["access_token"]) end)
+      # 어느 유튜브 채널에 붙었는지 적어 둔다. 조회가 안 되면 만료시각만 갱신한다.
+      # **중복 검사는 여기서 하지 않는다.** 이 함수는 한 시간마다 도는 토큰 갱신도 함께
+      # 타는데, 갱신은 늘 같은 계정을 돌려주므로 이미 겹쳐 있는 행이 있으면 멀쩡한
+      # 갱신까지 전부 막힌다 (실측: /series 가 통째로 500). 검사는 사람이 처음 연결하는
+      # `connect/2` 에서만 한다.
+      case whoami(tokens["access_token"]) do
+        {:ok, id, title} ->
+          Publishing.update_channel(channel, %{
+            token_expires_at: expires_at,
+            account_id: "#{id}|#{title}"
+          })
+
+        :error ->
+          Publishing.update_channel(channel, %{token_expires_at: expires_at})
+      end
     end
   end
 
-  @doc """
-  이 토큰이 어느 유튜브 채널 것인지 읽어 `account_id` 에 적는다.
+  # 사람이 "구글로 로그인" 을 눌러 새로 붙일 때만 탄다.
+  #
+  # `videos.insert` 에는 채널을 지정하는 항목이 없다 — 토큰이 곧 채널이다. 그래서 두 칸이
+  # 같은 계정에 연결되면 "시리즈마다 다른 채널" 이 말만 그렇고 전부 한 곳으로 간다.
+  # 실제로 네 칸이 같은 채널을 물어 13편이 한 채널에 쌓였다.
+  defp reject_duplicate(channel) do
+    case Publishing.channel_conflicts(channel) do
+      [] ->
+        {:ok, channel}
 
-  돌려주는 값은 쓰지 않는다 — 부수적인 일이라 실패해도 연결을 되돌리지 않는다.
-  """
-  def identify(channel, access_token) when is_binary(access_token) do
+      taken ->
+        title = channel.account_id |> String.split("|") |> List.last()
+
+        # 연결을 되돌린다. 토큰을 남겨 두면 화면에는 "연결됨" 으로 보인다.
+        Credentials.delete(channel.credential_ref)
+        Publishing.update_channel(channel, %{token_expires_at: nil, account_id: ""})
+
+        {:error,
+         "'#{title}' 은(는) 이미 #{Enum.map_join(taken, ", ", & &1.display_name)} 에 " <>
+           "연결돼 있습니다. 한 유튜브 채널은 한 칸에만 연결할 수 있습니다 — " <>
+           "칸마다 다른 채널을 고르거나, 먼저 저쪽 연결을 끊으세요."}
+    end
+  end
+
+  @doc "이 토큰이 어느 유튜브 채널 것인지 읽기만 한다 (저장하지 않는다)."
+  def whoami(access_token) when is_binary(access_token) do
     url = "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true"
 
     case Req.get(url, auth: {:bearer, access_token}, receive_timeout: 15_000) do
       {:ok, %{status: 200, body: %{"items" => [%{"id" => id, "snippet" => snip} | _]}}} ->
-        title = snip["title"] || ""
-        Publishing.update_channel(channel, %{account_id: "#{id}|#{title}"})
-        {:ok, id, title}
+        {:ok, id, snip["title"] || ""}
 
       other ->
         Logger.warning("연결된 유튜브 채널을 못 읽었습니다: #{inspect(other)}")
         :error
     end
   rescue
-    e -> Logger.warning("연결된 유튜브 채널 조회 실패: #{inspect(e)}")
+    e ->
+      Logger.warning("연결된 유튜브 채널 조회 실패: #{inspect(e)}")
+      :error
   end
 
-  def identify(_channel, _), do: :error
+  def whoami(_), do: :error
+
+  @doc """
+  이 토큰이 어느 유튜브 채널 것인지 읽어 `account_id` 에 적는다.
+
+  돌려주는 값은 쓰지 않는다 — 부수적인 일이라 실패해도 연결을 되돌리지 않는다.
+  """
+  def identify(channel, access_token) do
+    case whoami(access_token) do
+      {:ok, id, title} ->
+        Publishing.update_channel(channel, %{account_id: "#{id}|#{title}"})
+        {:ok, id, title}
+
+      :error ->
+        :error
+    end
+  end
 
   defp existing_refresh(ref) do
     with {:ok, raw} <- Credentials.get(ref),
@@ -192,7 +238,8 @@ defmodule VideoTool.Publishing.GoogleOAuth do
 
     case Req.post(@token_url, form: body, receive_timeout: 20_000) do
       {:ok, %{status: 200, body: %{"access_token" => token} = tokens}} ->
-        {:ok, _} = store(channel, Map.put(tokens, "refresh_token", refresh_token))
+        # 저장이 실패해도 토큰 자체는 쓸 수 있다. 여기서 터뜨리면 상태 화면이 통째로 죽는다.
+        _ = store(channel, Map.put(tokens, "refresh_token", refresh_token))
         {:ok, token}
 
       {:ok, %{status: status, body: body}} ->

@@ -27,6 +27,10 @@ defmodule VideoToolWeb.Endpoint do
     only: VideoToolWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 
+  # 그림체 예시 사진. priv/static 으로 복사하지 않고 폴더째 연다 —
+  # 한 장에 2MB 라 사본을 두면 저장소가 그만큼 두 배가 된다.
+  plug Plug.Static, at: "/style-examples", from: "style-examples", gzip: false
+
   if Code.ensure_loaded?(Tidewave) do
     plug Tidewave
   end

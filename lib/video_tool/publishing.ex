@@ -27,17 +27,28 @@ defmodule VideoTool.Publishing.Channel do
     field :max_duration_sec, :integer, default: 0
     field :is_active, :boolean, default: true
 
+    # 어느 시리즈의 어느 칸인가. 시리즈마다 본채널·쇼츠 두 칸이다.
+    field :series_id, :integer
+    field :kind, :string, default: "main"
+
     timestamps(type: :utc_datetime)
   end
 
   def platforms, do: @platforms
+
+  @kinds ~w(main shorts)
+  def kinds, do: @kinds
+
+  def kind_label("shorts"), do: "쇼츠"
+  def kind_label(_), do: "채널"
 
   def changeset(struct, attrs) do
     struct
     |> cast(attrs, ~w(platform slug display_name account_id credential_ref token_expires_at
                       default_privacy default_category default_language title_pattern
                       description_pattern default_hashtags aspect_required max_duration_sec
-                      is_active)a)
+                      is_active series_id kind)a)
+    |> validate_inclusion(:kind, @kinds)
     |> validate_required([:platform, :slug, :display_name])
     |> validate_inclusion(:platform, @platforms)
     |> validate_inclusion(:aspect_required, ["16:9", "9:16", "any"])
@@ -147,6 +158,71 @@ defmodule VideoTool.Publishing do
       c -> {:ok, c}
     end
   end
+
+  # ── 시리즈별 채널 ──────────────────────────────────────────────
+
+  @doc """
+  이 시리즈의 두 칸 — 본채널과 쇼츠. 없으면 만들어서 돌려준다.
+
+  칸을 미리 만들어 두는 이유: 연결 버튼이 **붙을 자리**가 먼저 있어야 한다.
+  "연결하려면 먼저 채널 행을 만드세요" 는 사람이 할 일이 아니다.
+  """
+  def series_channels(series) do
+    Enum.map(Channel.kinds(), fn kind ->
+      Repo.get_by(Channel, series_id: series.id, kind: kind) || create_series_channel(series, kind)
+    end)
+  end
+
+  defp create_series_channel(series, kind) do
+    base = slug_base(series)
+    slug = if kind == "main", do: base, else: "#{base}-shorts"
+
+    {:ok, channel} =
+      create_channel(%{
+        platform: "youtube",
+        slug: slug,
+        display_name: "#{series.name} #{Channel.kind_label(kind)}",
+        series_id: series.id,
+        kind: kind,
+        aspect_required: series.aspect,
+        # 쇼츠는 3분을 넘으면 일반 영상으로 올라간다.
+        max_duration_sec: if(kind == "shorts", do: 180, else: 0),
+        default_privacy: "private"
+      })
+
+    channel
+  end
+
+  # 이미 연결해 둔 칸이 있으면 그 slug 를 기준으로 삼는다 — 새 이름을 지으면
+  # credential_ref 가 달라져 붙어 있던 토큰을 잃는다.
+  defp slug_base(series) do
+    cond do
+      series.channel_slug not in [nil, ""] -> series.channel_slug
+      true -> "yt-s#{series.id}"
+    end
+  end
+
+  @doc """
+  같은 유튜브 채널을 가리키는 다른 칸이 있는가.
+
+  `videos.insert` 에는 채널을 지정하는 항목이 없다 — **토큰이 곧 채널이다.**
+  그래서 두 칸이 같은 계정에 연결되면 "시리즈마다 다른 채널" 이 말만 그렇고 실제로는
+  한 곳으로 간다. 실제로 네 칸이 전부 같은 채널을 물어 13편이 한 채널에 쌓였다.
+  """
+  def channel_conflicts(%Channel{account_id: id}) when id in [nil, ""], do: []
+
+  def channel_conflicts(%Channel{} = channel) do
+    account = youtube_id(channel.account_id)
+
+    Repo.all(from c in Channel, where: c.id != ^channel.id and c.account_id != "")
+    |> Enum.filter(&(youtube_id(&1.account_id) == account))
+  end
+
+  @doc "`\"UCxxxx|제목\"` 에서 채널 id 만. 제목은 사람이 바꿀 수 있어 비교 기준이 못 된다."
+  def youtube_id(account_id) when is_binary(account_id),
+    do: account_id |> String.split("|") |> List.first() |> to_string()
+
+  def youtube_id(_), do: ""
 
   @doc """
   에이전트가 작성한 제목·설명을 저장만 한다. 발행하지 않는다.

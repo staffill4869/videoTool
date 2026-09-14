@@ -7,15 +7,17 @@ defmodule VideoToolWeb.SeriesLive do
   """
   use VideoToolWeb, :live_view
 
-  alias VideoTool.{Presets, Projects, Series}
+  alias VideoTool.{AgentStatus, Presets, Projects, Publishing, Series}
+  alias VideoTool.Publishing.{Channel, GoogleOAuth}
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(editing: nil, form_error: nil) |> load()}
+    {:ok, socket |> assign(editing: nil, form_error: nil, open: nil) |> load()}
   end
 
   defp load(socket) do
     series = Series.list()
+    projects = AgentStatus.projects()
 
     assign(socket,
       series: series,
@@ -24,8 +26,24 @@ defmodule VideoToolWeb.SeriesLive do
       domains: Presets.list_domains(),
       voices: Presets.list_voices(),
       languages: Projects.language_names(),
-      summary: VideoTool.Work.summary()
+      summary: VideoTool.Work.summary(),
+      oauth_ready: GoogleOAuth.configured?(),
+      # 시리즈마다 채널·쇼츠 두 칸. 없으면 만들어서 돌려준다.
+      channels:
+        Map.new(series, fn s -> {s.id, Enum.map(Publishing.series_channels(s), &decorate/1)} end),
+      # 시리즈가 찍어낸 프로젝트. 펼쳤을 때만 보여준다.
+      by_series: Enum.group_by(projects, & &1.series_id)
     )
+  end
+
+  defp decorate(channel) do
+    %{
+      row: channel,
+      usable: Publishing.token_usable?(channel),
+      conflicts: Publishing.channel_conflicts(channel),
+      account: Publishing.youtube_id(channel.account_id),
+      account_title: channel.account_id |> String.split("|") |> List.last()
+    }
   end
 
   # ── 이벤트 ──────────────────────────────────────────────────────
@@ -94,6 +112,29 @@ defmodule VideoToolWeb.SeriesLive do
     {:ok, series} = Series.get(id)
     {:ok, _} = Series.delete(series)
     {:noreply, socket |> put_flash(:info, "지웠습니다. 만들어진 프로젝트는 남아 있습니다.") |> load()}
+  end
+
+  # ── 프로젝트 펼치기 ────────────────────────────────────────────
+
+  def handle_event("expand", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    {:noreply, assign(socket, open: if(socket.assigns.open == id, do: nil, else: id))}
+  end
+
+  # ── 채널 연결 ──────────────────────────────────────────────────
+
+  def handle_event("connect", %{"slug" => slug}, socket) do
+    case GoogleOAuth.authorize_url(slug) do
+      # 구글 동의 화면으로 보낸다. 돌아오면 콜백이 토큰을 저장한다.
+      {:ok, url} -> {:noreply, redirect(socket, external: url)}
+      {:error, reason} -> {:noreply, put_flash(socket, :error, reason)}
+    end
+  end
+
+  def handle_event("disconnect", %{"slug" => slug}, socket) do
+    {:ok, channel} = Publishing.fetch_channel(slug)
+    {:ok, _} = GoogleOAuth.disconnect(channel)
+    {:noreply, socket |> put_flash(:info, "#{channel.display_name} 연결을 끊었습니다") |> load()}
   end
 
   defp normalize(params) do
@@ -228,9 +269,18 @@ defmodule VideoToolWeb.SeriesLive do
                     {(s.active && "켜짐") || "꺼짐"}
                   </span>
                 </div>
-                <div class="mt-1 text-xs opacity-70">
-                  {s.style.name} · {s.domain.name} · {s.voice.display_name} · {s.aspect} ·
-                  {s.target_sec}초 · 언어 {Enum.join(s.languages || [], ", ")}
+                <div class="mt-1 flex items-center gap-2 text-xs opacity-70">
+                  <img
+                    :if={Presets.style_example(s.style.name)}
+                    src={Presets.style_example(s.style.name)}
+                    alt={s.style.name}
+                    loading="lazy"
+                    class="h-16 w-9 shrink-0 rounded object-cover"
+                  />
+                  <span>
+                    {s.style.name} · {s.domain.name} · {s.voice.display_name} · {s.aspect} ·
+                    {s.target_sec}초 · 언어 {Enum.join(s.languages || [], ", ")}
+                  </span>
                 </div>
                 <div class="text-xs opacity-70">
                   {if s.interval_minutes > 0,
@@ -261,14 +311,123 @@ defmodule VideoToolWeb.SeriesLive do
               </div>
             </div>
 
+            <%!-- 올라갈 곳. 한 시리즈에 채널·쇼츠 두 칸이고, 한 유튜브 채널은 한 칸에만 붙는다 —
+                  videos.insert 에 채널을 지정하는 항목이 없어 토큰이 곧 채널이기 때문이다. --%>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+              <.channel_block :for={c <- @channels[s.id] || []} c={c} oauth_ready={@oauth_ready} />
+            </div>
+
             <div :if={s.standing_prompt != ""} class="mt-1">
               <div class="text-xs font-semibold opacity-60">상시 프롬프트</div>
               <pre class="mt-1 max-h-24 overflow-auto rounded bg-base-100 p-2 text-xs whitespace-pre-wrap">{s.standing_prompt}</pre>
+            </div>
+
+            <button phx-click="expand" phx-value-id={s.id} class="btn btn-ghost btn-xs mt-1 self-start">
+              {(@open == s.id && "닫기") || "만든 편 #{length(@by_series[s.id] || [])}개 보기"}
+            </button>
+
+            <div :if={@open == s.id} class="overflow-x-auto rounded border border-base-300">
+              <div :if={(@by_series[s.id] || []) == []} class="p-3 text-sm opacity-60">
+                아직 만든 편이 없습니다.
+              </div>
+              <table :if={(@by_series[s.id] || []) != []} class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>제목</th>
+                    <th>단계</th>
+                    <th>지금</th>
+                    <th>발행</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={p <- @by_series[s.id]}>
+                    <td class="font-mono text-xs">{p.id}</td>
+                    <td class="max-w-[18rem] truncate">
+                      <.link navigate={~p"/projects/#{p.id}"} class="link">{p.title}</.link>
+                    </td>
+                    <td>
+                      <div class="flex gap-1">
+                        <span
+                          :for={{label, have, want} <- [
+                            {"장면", p.scenes, 1},
+                            {"CLEAN", p.clean, p.scenes},
+                            {"INFO", p.info, p.scenes},
+                            {"VIDEO", p.clip, p.scenes},
+                            {"완성", p.renders, 1}
+                          ]}
+                          class={[
+                            "rounded px-1.5 py-0.5 font-mono text-[11px]",
+                            (have >= want and want > 0 && "bg-success/20") || "bg-base-300 opacity-60"
+                          ]}
+                        >
+                          {label}{have}
+                        </span>
+                      </div>
+                    </td>
+                    <td class="text-sm">{p.now}</td>
+                    <td>
+                      <span :if={p.published} class="badge badge-success badge-sm">올림</span>
+                      <span :if={!p.published} class="text-xs opacity-40">—</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       </div>
     </Layouts.app>
+    """
+  end
+
+  attr :c, :map, required: true
+  attr :oauth_ready, :boolean, required: true
+
+  defp channel_block(assigns) do
+    ~H"""
+    <div class="rounded border border-base-300 bg-base-100 p-2">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-sm font-medium">{Channel.kind_label(@c.row.kind)}</div>
+          <div class="truncate font-mono text-[11px] opacity-60">{@c.row.slug}</div>
+        </div>
+        <span class={["badge badge-sm", (@c.usable && "badge-success") || "badge-ghost"]}>
+          {(@c.usable && "연결됨") || "미연결"}
+        </span>
+      </div>
+
+      <div :if={@c.usable and @c.account != ""} class="mt-1 truncate text-xs opacity-70">
+        {@c.account_title}
+      </div>
+
+      <%!-- 같은 유튜브 채널을 두 칸이 물면 둘 다 같은 곳으로 올라간다. 이미 그런 행이
+            남아 있어서(네 칸이 한 채널) 새 연결만 막고 기존 것은 여기에 띄운다. --%>
+      <div :if={@c.conflicts != []} class="mt-1 text-xs text-warning">
+        ⚠ {Enum.map_join(@c.conflicts, ", ", & &1.display_name)} 과(와) 같은 채널입니다.
+        한쪽을 끊고 다른 채널로 다시 연결하세요.
+      </div>
+
+      <div class="mt-1 flex gap-1">
+        <button
+          :if={not @c.usable and @oauth_ready}
+          phx-click="connect"
+          phx-value-slug={@c.row.slug}
+          class="btn btn-primary btn-xs"
+        >
+          구글로 로그인
+        </button>
+        <button
+          :if={@c.usable}
+          phx-click="disconnect"
+          phx-value-slug={@c.row.slug}
+          class="btn btn-ghost btn-xs"
+        >
+          연결 끊기
+        </button>
+        <span :if={not @oauth_ready} class="text-xs opacity-60">설정에서 OAuth 부터</span>
+      </div>
+    </div>
     """
   end
 
@@ -318,12 +477,31 @@ defmodule VideoToolWeb.SeriesLive do
           <textarea name="standing_prompt" rows="5" class="textarea textarea-bordered textarea-sm w-full font-mono text-xs">{@s.standing_prompt}</textarea>
         </.section>
 
+        <.section title="그림체 고르기" hint="같은 주제를 열세 가지로 그려 둔 것이다. 눌러서 고른다">
+          <%!-- 글로만 고르면 "종이 디오라마" 와 "빈티지 콜라주" 가 뭐가 다른지 알 수 없다.
+                사진을 누르면 아래 그림체 칸이 채워진다. LiveView 왕복이 필요 없는 일이라
+                작은 인라인 JS 로 끝낸다 — 서버에 보낼 상태가 아니다. --%>
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <button
+              :for={x <- Presets.styles_with_examples()}
+              type="button"
+              title={x.name}
+              onclick={"document.getElementById('style-name-input').value = #{Jason.encode!(x.name)}"}
+              class="overflow-hidden rounded-lg border-2 border-base-300 hover:border-primary"
+            >
+              <img src={x.url} alt={x.name} loading="lazy" class="aspect-[9/16] w-full object-cover" />
+              <div class="truncate px-1.5 py-1 text-xs">{x.name}</div>
+            </button>
+          </div>
+        </.section>
+
         <.section title="제작 설정">
           <div class="grid gap-3 md:grid-cols-3">
             <%!-- select 가 아니라 datalist 다. 목록에서 고를 수도 있고, 없는 이름을 직접 쳐서
                   그 자리에서 만들 수도 있다. 만들려고 다른 화면으로 갔다 오게 하지 않는다. --%>
-            <.field label="그림체" hint="목록에 없으면 직접 쓰면 새로 만들어진다">
+            <.field label="그림체" hint="아래 사진에서 고르거나, 없는 이름을 직접 쓰면 새로 만들어진다">
               <input
+                id="style-name-input"
                 name="style_name"
                 list="style-options"
                 value={name_of(@styles, @s.style_id)}
