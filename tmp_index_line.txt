@@ -1,1 +1,0 @@
-- [2026-09-14] publish 가 요구하는 final 검증을 LiveView 버튼만 기록해 무인 에이전트는 영원히 발행 불가였다 (UI 전용 부작용 → 도구로도 노출한다: MCP `validate` 추가). assemble 을 다시 돌리면 render 가 새로 생겨 발행 초안이 끊기므로 save_publish_meta 를 다시 부른다

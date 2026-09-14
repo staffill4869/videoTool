@@ -75,3 +75,9 @@ lines*.json
 /server.err.log
 /logs/
 /.agent.lock
+
+# 에이전트가 만드는 임시 파일
+/tmp_*
+/probe*.exs
+/val*.exs
+/chk.exs
