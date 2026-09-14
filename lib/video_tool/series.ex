@@ -133,6 +133,24 @@ defmodule VideoTool.Series do
     Repo.all(from s in Recipe, order_by: [desc: s.updated_at], preload: [:style, :domain, :voice])
   end
 
+  @doc """
+  시리즈별로 마지막으로 발행된 시각. 없으면 그 시리즈가 없는 키다.
+
+  무인 루프가 "어느 편을 이어서 할까" 를 고를 때 쓴다. 진행도만 보고 고르면 **손이 많이 간
+  시리즈만 계속 밀어 주게 된다** — 다른 시리즈는 켜 두기만 하고 영영 안 나간다.
+  """
+  def last_published_by_series do
+    Repo.all(
+      from p in Project,
+        join: pub in "publications",
+        on: pub.project_id == p.id and pub.status == "published",
+        where: not is_nil(p.series_id),
+        group_by: p.series_id,
+        select: {p.series_id, max(pub.updated_at)}
+    )
+    |> Map.new()
+  end
+
   def get(id) do
     case Repo.get(Recipe, id) |> Repo.preload([:style, :domain, :voice]) do
       nil -> {:error, "시리즈 #{id} 을(를) 찾을 수 없습니다"}

@@ -51,8 +51,11 @@ videoTool 로 영상 한 편을 끝까지 만들어 올린다.
 
 ## 순서
 
-1. list_projects(unfinished_only: true) 로 이어서 할 편을 하나 고른다.
-   가장 많이 진행된 것부터 끝낸다 — 새로 벌이지 말고 밀린 것을 닫는다.
+1. list_projects(unfinished_only: true) 로 이어서 할 편을 고른다.
+   **맨 위를 집으면 된다** — 오래 못 나간 시리즈가 앞에 오고, 그 안에서 많이 진행된 편이
+   앞에 오도록 서버가 이미 정렬해 준다. 진행도만 보고 고르면 손이 많이 간 시리즈만 계속
+   밀어 주게 되고 다른 시리즈는 켜 두기만 하고 영영 안 나간다.
+   `series_quiet_hours` 가 그 시리즈가 몇 시간째 못 나갔는지다 (9999 = 한 번도 안 나감).
    전부 끝났으면 run_series 로 새 편을 만든다.
 2. next_job 을 반복해 대본·장면·허용수치를 채운다. 더 안 내줄 때까지.
 3. flow_new_project → flow_generate(clean) → flow_job → flow_harvest

@@ -728,34 +728,56 @@ defmodule VideoTool.MCP do
     end
   end
 
+  # 순서가 곧 지시다. 무인 루프는 맨 위를 집어 간다.
+  #
+  # 진행도만 보고 고르면 **손이 많이 간 시리즈만 계속 밀어 주게 된다** — 다른 시리즈는
+  # 켜 두기만 하고 영영 안 나간다. 그래서 먼저 **오래 못 나간 시리즈**를 앞에 놓고,
+  # 그 안에서 가장 많이 진행된 편을 앞에 놓는다 (거의 다 된 것을 닫는 게 싸다).
   defp handle("list_projects", args) do
     only_unfinished = args["unfinished_only"] != false
+    last_pub = Series.last_published_by_series()
+    names = Map.new(Series.list(), &{&1.id, &1.name})
+    now = DateTime.utc_now()
 
     rows =
       Projects.list_projects()
       |> Enum.map(fn p ->
         counts = Media.asset_counts(p.id)
         renders = length(Media.renders(p.id))
+        scenes = length(Projects.scenes(p.id))
+        done = (counts["clean"] || 0) + (counts["info"] || 0) + (counts["clip"] || 0)
+        # 한 번도 안 나간 시리즈가 제일 급하다.
+        starved = starved_hours(last_pub[p.series_id], now)
 
         %{
           id: p.id,
           title: p.title,
           status: p.status,
           series_id: p.series_id,
-          scenes: length(Projects.scenes(p.id)),
+          series: names[p.series_id],
+          series_quiet_hours: starved,
+          scenes: scenes,
           clean: counts["clean"] || 0,
           info: counts["info"] || 0,
           clip: counts["clip"] || 0,
           renders: renders,
+          progress: if(scenes > 0, do: Float.round(done / (scenes * 3), 2), else: 0.0),
           published: Publishing.publications(p.id) |> Enum.any?(&(&1.status == "published"))
         }
       end)
       |> then(fn list ->
         if only_unfinished, do: Enum.filter(list, &(&1.renders == 0 or not &1.published)), else: list
       end)
+      |> Enum.sort_by(&{-&1.series_quiet_hours, -&1.progress, &1.id})
 
-    %{ok: true, projects: rows, count: length(rows)}
+    %{
+      ok: true,
+      projects: rows,
+      count: length(rows),
+      order: "오래 못 나간 시리즈 먼저, 그 안에서 많이 진행된 편 먼저 — 맨 위부터 집으세요"
+    }
   end
+
 
   defp handle("work_summary", _args), do: Map.merge(%{ok: true}, Work.summary())
 
@@ -1309,6 +1331,10 @@ defmodule VideoTool.MCP do
       running: Enum.map(running, &%{job_id: &1.id, project_id: &1.project_id, stage: &1.model})
     }
   end
+
+  # 한 번도 발행 안 한 시리즈는 아주 큰 값으로 둔다. "며칠째 못 나갔나" 보다 앞선다.
+  defp starved_hours(nil, _now), do: 9_999
+  defp starved_hours(at, now), do: div(DateTime.diff(now, DateTime.from_naive!(at, "Etc/UTC")), 3600)
 
   defp changeset_error(cs) do
     cs
