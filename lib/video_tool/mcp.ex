@@ -161,6 +161,13 @@ defmodule VideoTool.MCP do
         ["project_id", "file"]
       ),
       tool(
+        "check_video",
+        "발행하기 전에 완성본을 검사한다. 정렬·클립·자막·썸네일·길이. " <>
+          "**publish 하기 직전에 반드시 부르고, 걸린 항목은 고친 뒤 올린다**",
+        %{"project_id" => int("프로젝트 id")},
+        ["project_id"]
+      ),
+      tool(
         "drop_assets",
         "잘못 들어온 자산을 그 단계째 지운다. 다른 편의 결과를 긁어왔을 때 쓴다. " <>
           "confirm 이 true 가 아니면 몇 건인지만 알려주고 지우지 않는다",
@@ -1094,6 +1101,14 @@ defmodule VideoTool.MCP do
         else
           {:error, reason} -> %{ok: false, error: inspect_error(reason)}
         end
+    end
+  end
+
+  defp handle("check_video", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]) do
+      VideoTool.Check.run(project) |> Map.put(:ok, true) |> Map.put(:project_id, project.id)
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
     end
   end
 
