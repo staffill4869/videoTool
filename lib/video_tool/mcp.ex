@@ -999,6 +999,9 @@ defmodule VideoTool.MCP do
 
   # 가장 최근 작업 하나만 본다. 예전에는 "돌고 있는 것 없으면 과거 실패 아무거나" 를 돌려줘서,
   # 새 작업이 성공해도 며칠 전 실패가 나왔다 — 그걸 보고 잘못 판단하게 된다.
+  defp handle("flow_job", %{"project_id" => nil}), do: flow_jobs_overview()
+  defp handle("flow_job", args) when not is_map_key(args, "project_id"), do: flow_jobs_overview()
+
   defp handle("flow_job", args) do
     case Jobs.latest_flow_job(args["project_id"]) do
       nil ->
@@ -1019,8 +1022,18 @@ defmodule VideoTool.MCP do
     case Flow.status() do
       {:ok, status} ->
         ready = status[:flow_tab] == true and status[:prompt_box] == true
+        running = Jobs.running_flow_jobs()
 
-        Map.merge(%{ok: true, ready: ready}, status)
+        Map.merge(
+          %{
+            ok: true,
+            ready: ready,
+            # 서버를 재시작하면 이것들이 실패로 찍힌다. restart.ps1 이 여기를 본다.
+            running_jobs: length(running),
+            running: Enum.map(running, &%{job_id: &1.id, project_id: &1.project_id, stage: &1.model})
+          },
+          status
+        )
         |> Map.put(
           :next_step,
           cond do
@@ -1233,6 +1246,19 @@ defmodule VideoTool.MCP do
   end
 
   defp length_advice(_delta, _project, _est), do: "목표 길이에 맞습니다"
+
+  # flow_job 을 project_id 없이 부르면 Ecto 가 nil 비교로 터졌다. 물어본 게
+  # "지금 도는 게 있나" 이므로 터뜨리지 말고 그 답을 준다.
+  defp flow_jobs_overview do
+    running = Jobs.running_flow_jobs()
+
+    %{
+      ok: true,
+      state: if(running == [], do: "idle", else: "running"),
+      running_jobs: length(running),
+      running: Enum.map(running, &%{job_id: &1.id, project_id: &1.project_id, stage: &1.model})
+    }
+  end
 
   defp changeset_error(cs) do
     cs

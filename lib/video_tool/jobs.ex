@@ -158,6 +158,20 @@ defmodule VideoTool.Jobs do
     )
   end
 
+  @doc """
+  지금 돌고 있는 Flow 작업 전부 (프로젝트 불문).
+
+  서버를 껐다 켜면 아래 `sweep` 이 이것들을 실패로 찍는다. 그래서 재시작 전에
+  먼저 물어볼 곳이 필요하다 — restart.ps1 이 이걸 본다.
+  """
+  def running_flow_jobs do
+    Repo.all(
+      from j in GenerationJob,
+        where: j.provider == "flow" and j.status == "running",
+        order_by: [asc: j.id]
+    )
+  end
+
   @doc "이 프로젝트의 가장 최근 Flow 작업. 상태가 뭐든 최신 것 하나."
   def latest_flow_job(project_id) do
     Repo.one(
