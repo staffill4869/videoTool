@@ -452,6 +452,149 @@ defmodule VideoToolWeb.CoreComponents do
     """
   end
 
+  @doc """
+  진행 눈금 여덟 칸. `VideoTool.Progress` 가 만든 `steps` 와 `ticks` 를 그대로 받는다.
+
+  **색은 점에만 준다.** daisyUI 의 `warning`·`success` 는 밝기가 60~70% 라
+  밝은 판에서도 어두운 판에서도 작은 글자로는 대비가 모자란다 (실측 3:1 아래).
+  그래서 칸 이름은 언제나 `base-content` 로 두고, 중요한 칸은 굵기로만 구분한다.
+
+  ## Examples
+
+      <.pipeline steps={row.steps} ticks={row.ticks} />
+  """
+  attr :steps, :list, required: true
+  attr :ticks, :integer, required: true
+  attr :class, :any, default: nil
+
+  def pipeline(assigns) do
+    ~H"""
+    <div class={["grid grid-cols-8", @class]}>
+      <span class="sr-only">{pipeline_summary(@steps, @ticks)}</span>
+      <div :for={{step, i} <- Enum.with_index(@steps)} class="flex flex-col items-center gap-1.5">
+        <div class="relative flex h-4 w-full items-center justify-center">
+          <div
+            :if={i > 0}
+            class={[
+              "absolute left-0 right-1/2 top-1/2 h-0.5 -translate-y-1/2",
+              (i <= @ticks && "bg-success") || "bg-base-300"
+            ]}
+          />
+          <div
+            :if={i < length(@steps) - 1}
+            class={[
+              "absolute left-1/2 right-0 top-1/2 h-0.5 -translate-y-1/2",
+              (i < @ticks && "bg-success") || "bg-base-300"
+            ]}
+          />
+          <span class={["relative rounded-full", dot_class(step.state)]} />
+        </div>
+        <span class={["whitespace-nowrap text-[10px] leading-none", label_class(step.state)]}>
+          {step.name}
+        </span>
+      </div>
+    </div>
+    """
+  end
+
+  defp dot_class(:done), do: "size-3 bg-success"
+  defp dot_class(:running), do: "size-3.5 bg-warning ring-4 ring-warning/25"
+  defp dot_class(:gate), do: "size-3 border-2 border-warning bg-base-100"
+  defp dot_class(:blocked), do: "size-3 bg-error"
+  defp dot_class(_), do: "size-3 border-2 border-base-300 bg-base-100"
+
+  defp label_class(:done), do: "text-base-content/60"
+  defp label_class(:wait), do: "text-base-content/40"
+  defp label_class(_), do: "font-semibold text-base-content"
+
+  defp pipeline_summary(steps, ticks) do
+    here = Enum.find(steps, &(&1.state != :done and &1.state != :wait))
+
+    case here do
+      nil -> "여덟 칸 모두 끝남"
+      %{name: name, state: state} -> "여덟 칸 중 #{ticks}칸 끝남. #{name} #{state_ko(state)}."
+    end
+  end
+
+  defp state_ko(:running), do: "도는 중"
+  defp state_ko(:gate), do: "내 차례"
+  defp state_ko(:blocked), do: "막힘"
+  defp state_ko(_), do: "대기"
+
+  @doc """
+  현황판의 수치 한 칸. 왼쪽 테두리 색이 상태를 나른다.
+  """
+  attr :label, :string, required: true
+  attr :value, :any, required: true
+  attr :note, :string, default: nil
+  attr :tone, :atom, default: :neutral, values: [:neutral, :running, :gate, :blocked, :done]
+  attr :navigate, :string, default: nil
+
+  def tile(%{navigate: nil} = assigns) do
+    ~H"""
+    <div class={[
+      "flex flex-col justify-between gap-3 rounded-lg border border-base-300 border-l-4 bg-base-100 p-3",
+      tone_class(@tone)
+    ]}>
+      <.tile_body label={@label} value={@value} note={@note} />
+    </div>
+    """
+  end
+
+  def tile(assigns) do
+    ~H"""
+    <.link
+      navigate={@navigate}
+      class={[
+        "flex flex-col justify-between gap-3 rounded-lg border border-base-300 border-l-4 bg-base-100 p-3 transition hover:bg-base-200",
+        tone_class(@tone)
+      ]}
+    >
+      <.tile_body label={@label} value={@value} note={@note} />
+    </.link>
+    """
+  end
+
+  attr :label, :string, required: true
+  attr :value, :any, required: true
+  attr :note, :string, default: nil
+
+  defp tile_body(assigns) do
+    ~H"""
+    <div class="text-xs font-semibold">{@label}</div>
+    <div class="flex items-baseline gap-2">
+      <span class="text-3xl font-bold leading-none">{@value}</span>
+      <span :if={@note} class="text-xs text-base-content/60">{@note}</span>
+    </div>
+    """
+  end
+
+  defp tone_class(:running), do: "border-l-warning"
+  defp tone_class(:gate), do: "border-l-warning"
+  defp tone_class(:blocked), do: "border-l-error"
+  defp tone_class(:done), do: "border-l-success"
+  defp tone_class(_), do: "border-l-base-300"
+
+  @doc """
+  「누가」 칩. 사람 차례만 반전색으로 튀게 둔다 — 그게 유일하게 자동으로 안 풀리는 것이다.
+  """
+  attr :owner, :string, required: true
+
+  def owner(assigns) do
+    ~H"""
+    <span class={[
+      "inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-semibold",
+      owner_class(@owner)
+    ]}>
+      {@owner}
+    </span>
+    """
+  end
+
+  defp owner_class("사람"), do: "bg-base-content text-base-100"
+  defp owner_class("끝"), do: "bg-base-200 text-base-content/50"
+  defp owner_class(_), do: "bg-base-300 text-base-content/80"
+
   ## JS Commands
 
   def show(js \\ %JS{}, selector) do

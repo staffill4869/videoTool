@@ -15,6 +15,22 @@ defmodule VideoTool.AgentStatus do
   @lock ".agent.lock"
   @task_name "videoTool-agent"
 
+  @doc """
+  PowerShell 을 타지 않는 가벼운 것들만.
+
+  `snapshot/0` 은 예약 작업을 읽으려고 PowerShell 을 띄운다 — 현황판은 늘 열려 있는
+  화면이라 그걸 주기마다 부르면 감시가 대상을 갉아먹는다 (실측으로 서버를 두 번 죽였다).
+  예약 작업까지 봐야 하면 에이전트 화면으로 간다.
+  """
+  def light do
+    %{
+      running: running(),
+      activity: VideoTool.Activity.summary(),
+      chrome: chrome(),
+      log: last_log_lines(6)
+    }
+  end
+
   @doc "한 번에 다 모은다. 화면이 주기적으로 부른다."
   def snapshot do
     %{
@@ -60,6 +76,7 @@ defmodule VideoTool.AgentStatus do
     case File.stat(path, time: :posix) do
       {:ok, %{mtime: m}} ->
         mins = div(System.os_time(:second) - m, 60)
+
         # 한 시간 넘게 잠겨 있으면 죽은 잠금이다 (run-agent.ps1 도 그렇게 판단한다).
         %{running: mins < 60, since_min: mins, stale: mins >= 60}
 
@@ -107,7 +124,10 @@ defmodule VideoTool.AgentStatus do
       counts = Media.asset_counts(p.id)
       scenes = length(Projects.scenes(p.id))
       renders = length(Media.renders(p.id))
-      published = p.id |> VideoTool.Publishing.publications() |> Enum.any?(&(&1.status == "published"))
+
+      published =
+        p.id |> VideoTool.Publishing.publications() |> Enum.any?(&(&1.status == "published"))
+
       job = Jobs.latest_flow_job(p.id)
 
       %{
