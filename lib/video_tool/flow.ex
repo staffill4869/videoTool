@@ -280,7 +280,15 @@ defmodule VideoTool.Flow do
     stage = Keyword.get(opts, :stage, "")
 
     run(
-      %{action: "wait_results", expect: expect, timeoutMs: timeout, since: since, stage: stage},
+      %{
+        action: "wait_results",
+        expect: expect,
+        timeoutMs: timeout,
+        since: since,
+        stage: stage,
+        known: Keyword.get(opts, :known, []),
+        fixedBaseline: Keyword.get(opts, :fixed_baseline, false)
+      },
       timeout + 30_000
     )
   end
@@ -515,7 +523,15 @@ defmodule VideoTool.Flow do
   # 실측: 영상 8개가 전부 나왔는데 900초를 넘겨 작업이 failed 로 찍히고 회수를 못 해,
   # 클립이 다 있는 프로젝트가 완성본 없이 남았다. 그래서 먼저 회수하고 나서 판단한다.
   defp collect(project, stage, expect, since, before, rounds_left, got) do
-    waited = wait_results(expect - got, since: since, stage: stage)
+    # 다시 기다릴 때는 기준선을 "생성 전 화면 + 이미 받은 것" 으로 고정한다. 드라이버 기본값은
+    # "지금 화면" 인데, 그러면 다 나왔지만 아직 못 받은 결과가 기준선에 들어가 새것으로 안 세진다 —
+    # 67·68번 7번 클립이 화면에 있는데 15분을 더 기다렸고, 멈춘 줄 알고 confirm 까지 보낼 뻔했다.
+    retry =
+      if rounds_left < @harvest_rounds,
+        do: [known: before ++ known_flow_ids(project.id, asset_kind(stage)), fixed_baseline: true],
+        else: []
+
+    waited = wait_results(expect - got, [since: since, stage: stage] ++ retry)
 
     with {:ok, harvested} <- harvest(project, stage, before) do
       new = harvested[:new] || 0

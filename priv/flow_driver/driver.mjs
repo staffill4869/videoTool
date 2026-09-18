@@ -713,7 +713,7 @@ async function showVideos(page) {
   }
 }
 
-async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0, stage = "", known = [] }) {
+async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0, stage = "", known = [], fixedBaseline = false }) {
   const page = await flowPage(browser, cfg, { open: false });
   if (!page) throw new Error("Flow 탭이 없습니다.");
 
@@ -739,7 +739,11 @@ async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0
 
   // 시작 시점에 이미 있던 id 를 기준선으로 잡는다. 이후 '새로 생긴 id' 만 센다 —
   // 개수로 세면 INFO 처럼 제자리에서 바뀌는 단계를 영원히 못 끝낸다.
-  const baseline = new Set([...(known || []), ...(await currentIds())]);
+  // 재대기(fixedBaseline)는 서버가 준 목록만 기준선으로 쓴다 — "생성 전 화면 + 이미 받은 것".
+  // 지금 화면을 넣으면 다 나왔는데 아직 못 받은 결과까지 기준선이 되어 영영 새것으로 안 센다.
+  const baseline = fixedBaseline
+    ? new Set(known || [])
+    : new Set([...(known || []), ...(await currentIds())]);
 
   const deadline = Date.now() + timeoutMs;
   let last = -1;
