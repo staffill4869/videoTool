@@ -1,0 +1,35 @@
+TASK: Actually generate one video per scene. Do not just write prompts.
+
+THE MOST IMPORTANT RULE — break it and everything must be redone.
+Each scene has TWO images. Use them as the FIRST FRAME and LAST FRAME of one video.
+Never animate a single image. The video must travel between the two.
+Pick the generation mode that accepts both a first frame and a last frame.
+Each scene below names its start and end frame by image id. Use exactly those two images —
+never pick by position in the project and never use the most recent image instead.
+Do not add or drop scenes. Make exactly one video per scene in the list. Finish them all.
+
+The model and product never change during the video. They must stay exactly this:
+{{character}}
+
+REAL LIVE-ACTION BEAUTY FILM
+- Every frame is photoreal, like a premium K-beauty commercial shot on a cinema camera. No cartoon, no morphing, no warping.
+- Her face stays the same person from the first frame to the last: same features, skin texture, hair and makeup.
+- Natural, gentle motion: a blink, a small head tilt, hair moving slightly, hands applying or holding the product, a soft smile.
+- She does NOT talk: lips closed or smiling. The voice is added later.
+- The bottle stays the same real bottle — same shape, glass, liquid colour and blank label. Liquid and droplets move like real liquid.
+- Product-only scenes: slow, smooth camera (a few degrees of orbit or a slow push), real light gliding over the glass.
+- Camera: at most a slow push in, pull back or small orbit. No fast moves, no rotation, no zoom blur.
+
+NO TEXT
+No readable text at any moment — no UI, captions, speech bubbles, labels, numbers or logos.
+
+STRUCTURE OF EACH 8-SECOND CLIP
+One continuous shot. Only the later part of each clip may be used, so the LAST beat must work on its own.
+Keep the light and palette consistent across scenes; never dip to black or flash to white.
+
+SOUND
+Soft, clean sound only: a light water drop, the dropper's soft squeeze, a gentle chime for glints, quiet room ambience.
+No speech, no human voice, no music track.
+
+── PER-SCENE MATERIAL ──
+{{scenes}}

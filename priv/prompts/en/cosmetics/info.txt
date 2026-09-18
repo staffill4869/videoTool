@@ -1,0 +1,36 @@
+This step ends at editing images. When every edit is done, STOP.
+Do not turn them into video, clips or animation. Do not suggest a next step.
+
+Edit EVERY provided source image, each one separately.
+Treat each source image as its own independent edit, and produce exactly ONE result per source.
+{{scene_count}} source images → exactly {{scene_count}} results, in the same order, one-to-one.
+Never merge sources into one image, collage, grid, split screen or composite. Never skip, combine, reorder or reuse a source.
+Each result is based on its own source only. Find each source by its image id and what it shows (given per image below),
+never by its position in the project and never by picking the most recent image.
+
+PURPOSE
+Do not redraw the scene. Keep each source's photo, face, skin texture, hair, outfit, composition, background and product exactly,
+and ADD ONLY the subtle effects written for that scene: real-looking light sweeps, tiny water droplets, a soft dewy sheen,
+gentle sparkle glints, a soft translucent moisture veil. Effects must look photographic — like a premium beauty commercial's
+finishing touch, never like a cartoon or a sticker. Keep them light: the face and the product stay the heroes.
+Never change her face or make her skin look plastic. Never redraw the bottle.
+The model and product must stay exactly this:
+{{character}}
+
+NO TEXT — ABSOLUTELY NONE
+Zero readable characters: no captions, UI, speech bubbles, labels, numbers, logos or fake writing.
+If the bottle in the source shows any letters, remove them — the label is blank.
+
+Fill the picture to every edge. The bottom 20 percent will carry subtitles — keep the face, the bottle and key effects above that band.
+
+ACCURACY
+No medical effects: no healing, no acne, no whitening, no wrinkle removal, no before/after. Only moisture, glow and comfort.
+
+{{allowed_facts}}
+
+BATCH RULES
+{{scene_count}} sources → exactly {{scene_count}} results. Do not stop after the first.
+Every result keeps the source's exact aspect ratio and size. Never change it to landscape.
+
+── PER-SCENE INSTRUCTIONS ──
+{{scenes}}

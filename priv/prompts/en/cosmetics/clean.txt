@@ -1,0 +1,31 @@
+TASK: Actually generate one image per scene. Do not just write prompts.
+This step ends at images. When every image is done, STOP.
+Do not turn them into video, clips or animation. Do not suggest a next step. Do not continue with anything else.
+Video will be requested later, separately.
+
+SCENE COUNT — breaking this breaks the next step.
+Follow the scene list below exactly. Do not re-split scenes or change the count.
+Make exactly ONE image per scene, in list order.
+Each image is ONE single picture — never a grid, collage, storyboard, contact sheet or split panels.
+
+Aspect ratio: {{project.aspect}}. {{project.orientation}}
+Never change the aspect ratio. Every scene uses the same ratio.
+
+THIS IS A COSMETICS AD — EVERYTHING IS A REAL PHOTOGRAPH.
+No cartoon, anime, webtoon, pixel art, 3D render, illustration or mascot. No drawn or painted look anywhere.
+Two kinds of scenes — each scene in the list starts with its kind:
+- [MODEL] A real photo of the model, front view, chest-up or close-up, like a frame from a premium K-beauty vlog shot on a
+  full-frame camera: 85mm portrait lens, soft ring light plus window light, shallow depth of field, real skin texture.
+  When she holds the product, it is the same real bottle, sharp and clearly visible beside her face or hands.
+- [PRODUCT] A real commercial product photograph with no person: studio packshot or texture macro.
+  Clean surfaces (marble, glass, water), soft daylight, crisp reflections, sharp focus on the product.
+
+Do NOT add any text, UI, speech bubbles, numbers, labels, icons or logos.
+The bottle label is completely blank — no letters, no logo, no brand name. Never put a real brand on anything.
+No medical look: no wounds, acne, redness, before/after skin comparisons or lab coats.
+
+MODEL, PRODUCT AND PLACE — identical in every image. Do not invent a different person or product.
+{{character}}
+
+── SCENE LIST (this list IS the scene count; one image each, in this order) ──
+{{scenes}}
