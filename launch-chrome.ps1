@@ -12,7 +12,7 @@ $port    = 9222
 # 로그인 없는 새 프로필이 만들어진다 — 실제로 그렇게 프로필이 둘로 갈렸다.
 $profile = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) ".chrome-profile"
 $chrome  = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$flowUrl = "https://labs.google/fx/ko/tools/flow"
+$flowUrl = "https://flow.google.com/"
 
 if (-not (Test-Path $chrome)) { Write-Host "Chrome 을 찾을 수 없습니다: $chrome"; exit 1 }
 
@@ -31,6 +31,23 @@ Start-Process -FilePath $chrome -ArgumentList @(
   "--no-default-browser-check",
   $flowUrl
 )
+
+# 프로필 시작 페이지(zum 같은 포털)가 같이 뜨면 **닫는다.** 광고 iframe 을 십수 개 끌고 와서
+# Playwright 가 붙을 때 전부 따라 붙느라 연결이 늦어지고, 드라이버가 그걸 "걸렸다" 고 보고
+# 청소하다가 Chrome 을 통째로 죽였다(2026-09-18, iframe 16개 중 14개가 zum 광고였다).
+# 탭 하나만 닫는 /json/close 라 브라우저는 건드리지 않는다.
+Start-Sleep -Seconds 4
+try {
+  $tabs = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 5
+  foreach ($t in $tabs) {
+    if ($t.type -eq "page" -and $t.url -notlike "*flow.google.com*" -and $t.url -notlike "*accounts.google.com*") {
+      Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/close/$($t.id)" -TimeoutSec 5 | Out-Null
+      Write-Host "딸려 온 탭을 닫았습니다: $($t.url)"
+    }
+  }
+} catch {
+  # 못 닫아도 Chrome 은 떠 있다. 여기서 실패시키지 않는다.
+}
 
 Write-Host "Chrome 을 띄웠습니다 (포트 $port, 프로필 $profile)"
 Write-Host ""

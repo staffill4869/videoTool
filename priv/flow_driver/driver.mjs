@@ -80,7 +80,13 @@ async function closeStuckTargets() {
     return 0; // 목록을 못 읽으면 그냥 붙어본다. 여기서 실패시키지 않는다.
   }
 
-  const stuck = list.filter((t) => t.type === "iframe" || t.type === "other");
+  // **걸린 것만** 닫는다. 예전엔 iframe·other 를 전부 닫았다 — 그러다 2026-09-18 INFO 도중
+  // 한 번에 20개를 닫고 Chrome 이 통째로 죽었다. 그중 대부분은 같은 창에 떠 있던 포털(zum)의
+  // 광고 iframe 이었고, Flow 의 reCAPTCHA iframe 도 섞여 있었다. 치울 이유가 있는 건
+  // 구글 로그인이 남기는 RotateCookiesPage 하나뿐이다. worker·browser_ui·other 는 절대 안 건드린다.
+  const stuck = list.filter(
+    (t) => t.type === "iframe" && /accounts\.google\.com\/RotateCookiesPage/.test(t.url || "")
+  );
   for (const t of stuck) {
     try {
       await fetch(`${CDP}/json/close/${t.id}`, { signal: AbortSignal.timeout(3000) });
@@ -93,7 +99,9 @@ async function closeStuckTargets() {
 
 async function connect() {
   try {
-    return await chromium.connectOverCDP(CDP, { timeout: 8000 });
+    // 생성 중인 Flow 창은 무겁다. 8초로는 붙기 전에 끊겨, 멀쩡한 Chrome 을 "걸렸다" 고
+    // 판단하고 청소로 넘어갔다. 넉넉히 준다.
+    return await chromium.connectOverCDP(CDP, { timeout: 20000 });
   } catch {
     /* 아래에서 한 번 더 */
   }
