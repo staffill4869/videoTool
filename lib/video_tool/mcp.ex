@@ -11,9 +11,6 @@ defmodule VideoTool.MCP do
   alias VideoTool.Publishing.GoogleOAuth
   alias VideoTool.{Flow, Ingest, Jobs, Media, Pipeline, Projects, Prompt, Publishing, Presets, Series, Work, Insights, Settings}
 
-  # Flow Ultra 기준. 사용자가 화면에서 읽은 값으로 갱신할 수 있다.
-  @krw_per_flow_credit 13.7
-
   # ── 툴 목록 ─────────────────────────────────────────────────────
 
   def tools do
@@ -635,16 +632,14 @@ defmodule VideoTool.MCP do
 
   defp handle("cost_report", args) do
     with {:ok, project} <- Projects.get_project(args["project_id"]) do
-      credits = Jobs.credits_by_provider(project.id)
-      flow = Map.get(credits, "flow", 0.0)
-      total = credits |> Map.values() |> Enum.sum()
+      cost = Jobs.cost(project.id)
 
       %{
         ok: true,
-        by_provider: credits,
-        total: Float.round(total, 2),
-        krw_estimate: round(flow * @krw_per_flow_credit),
-        note: "Flow Ultra 기준 크레딧당 약 #{@krw_per_flow_credit}원. 힉스필드는 환산에서 제외"
+        by_provider: cost.by_provider,
+        total: cost.credits,
+        krw_estimate: cost.krw,
+        note: "Flow Ultra 기준 크레딧당 약 #{Jobs.krw_per_flow_credit()}원. 힉스필드는 환산에서 제외"
       }
     else
       {:error, reason} -> %{ok: false, error: reason}
@@ -1229,9 +1224,17 @@ defmodule VideoTool.MCP do
 
     if stage in ~w(clean info video) do
       with {:ok, project} <- Projects.get_project(args["project_id"]) do
-        case VideoTool.Flow.harvest(project, stage, []) do
-          {:ok, result} -> Map.put(result, :ok, true)
-          {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+        # 돌고 있는 작업도 끝에 회수한다. 같이 긁으면 둘 다 "아직 없음" 을 보고 각자 넣어
+        # 같은 클립이 두 번 등록된다(66번: 4장면에 클립 7개). 작업이 끝난 뒤에만 받는다.
+        case Jobs.running_flow_job(project.id) do
+          nil ->
+            case VideoTool.Flow.harvest(project, stage, []) do
+              {:ok, result} -> Map.put(result, :ok, true)
+              {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+            end
+
+          job ->
+            %{ok: false, error: "Flow 작업 #{job.id} 이 아직 돌고 있습니다. 끝나면 자동으로 회수하니 flow_job 으로 끝나기를 기다리세요."}
         end
       else
         {:error, reason} -> %{ok: false, error: inspect_error(reason)}

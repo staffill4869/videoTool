@@ -172,6 +172,7 @@ defmodule VideoTool.Presets do
     "종이 디오라마" => "12-paper-diorama.png",
     "클레이 스톱모션" => "13-clay-stopmotion.png",
     # 14·15 는 같은 주제 세트가 아니라 실제 편(65·66번)의 첫 장면에서 따왔다.
+    "픽셀 도트" => "14-pixel-art.png",
     "의인화 3D 매크로" => "15-anthro-3d-macro.png"
   }
 

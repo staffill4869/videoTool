@@ -81,3 +81,6 @@ lines*.json
 /probe*.exs
 /val*.exs
 /chk.exs
+
+# 배경 음악 원본은 bgm/CREDITS.md 의 주소에서 다시 받는다
+bgm/*.mp3
