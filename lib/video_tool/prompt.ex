@@ -245,10 +245,10 @@ defmodule VideoTool.Prompt do
   # 영어판 INFO·VIDEO. CLEAN 은 원래부터 영어라 따로 없다.
   # VIDEO 에서 "대본 구간" 은 뺀다 — 나레이션은 한국어라 그대로 넣으면 영어 프롬프트에
   # 한국어가 섞인다. 화면에 필요한 건 shot_prompt 와 카메라 계획에 이미 다 있다.
-  # 원본을 **번호가 아니라 그림 내용으로** 가리킨다 (source_hint 참고).
+  # 원본을 **번호가 아니라 그림 내용과 ID 로** 가리킨다 (source_hint, media_ref 참고).
   defp render_scenes("info", scenes, _segments, _aspect, true) do
     Enum.map_join(scenes, "\n\n", fn s ->
-      "Image #{s.scene_no}\n  Edit the source image that shows: #{s.shot_prompt}\n  Add: #{s.info_instruction}"
+      "Image #{s.scene_no}\n  Edit the source image#{id_en(media_ref(s, "clean"))} that shows: #{s.shot_prompt}\n  Add: #{s.info_instruction}"
     end)
   end
 
@@ -258,6 +258,7 @@ defmodule VideoTool.Prompt do
 
       """
       --- SCENE #{pad(s.scene_no)} (#{fmt(s.target_sec)}s, #{s.purpose}) ---
+      #{frames_en(s)}
       Camera: early #{Map.get(plan, "early", "-")} / mid #{Map.get(plan, "mid", "-")} / late #{Map.get(plan, "late", "-")}
       Cutaway: #{Map.get(plan, "cutaway", "none")}
       Fast zoom: #{if s.use_fast_zoom, do: "yes", else: "no"}
@@ -269,6 +270,43 @@ defmodule VideoTool.Prompt do
   end
 
   defp render_scenes(stage, scenes, segments, aspect, _en), do: render_scenes(stage, scenes, segments, aspect)
+
+  # Flow 에이전트는 프로젝트 안의 그림을 UUID 로 부른다 — 실측(62번): "Using the provided reference
+  # image (49d94def-…) as a base". 회수할 때 source_filename 에 남긴 게 바로 그 UUID 다.
+  # 이걸 적어 주면 "N번" 이나 생성 순서에 기대지 않고 원본·짝을 정확히 집는다.
+  # 순서에 기대면 장면 하나만 다시 만든 뒤 에이전트가 가장 최근 그림으로 전부 그렸다.
+  defp media_ref(scene, kind) do
+    VideoTool.Media.list_assets(scene.project_id, kind)
+    |> Enum.filter(&(&1.scene_id == scene.id and &1.status != "rejected"))
+    |> Enum.max_by(& &1.order_confidence, fn -> nil end)
+    |> case do
+      %{source_filename: id} when is_binary(id) ->
+        if Regex.match?(~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, id), do: id
+
+      _ ->
+        nil
+    end
+  end
+
+  defp id_en(nil), do: ""
+  defp id_en(id), do: " (image id #{id})"
+
+  defp id_ko(nil), do: ""
+  defp id_ko(id), do: " (이미지 id #{id})"
+
+  defp frames_en(s) do
+    case {media_ref(s, "clean"), media_ref(s, "info")} do
+      {nil, nil} -> "Frames: find this scene's start and end images by what they show."
+      {c, i} -> "Start frame: image id #{c || "(find by content)"}\nEnd frame: image id #{i || "(find by content)"}"
+    end
+  end
+
+  defp frames_ko(s) do
+    case {media_ref(s, "clean"), media_ref(s, "info")} do
+      {nil, nil} -> ""
+      {c, i} -> "시작 프레임: 이미지 id #{c || "(내용으로 찾기)"}\n끝 프레임: 이미지 id #{i || "(내용으로 찾기)"}\n"
+    end
+  end
 
   defp labels_en(%{expected_labels: []}), do: "(none)"
   defp labels_en(%{expected_labels: labels}), do: Enum.join(labels, " -> ")
@@ -292,7 +330,7 @@ defmodule VideoTool.Prompt do
   # 생기므로, 각 원본을 그림 내용(shot_prompt)으로 지목한다.
   defp render_scenes("info", scenes, _segments, _aspect) do
     Enum.map_join(scenes, "\n\n", fn s ->
-      "#{s.scene_no}번 이미지\n  편집할 원본: 이 장면을 담은 이미지 — #{s.shot_prompt}\n  추가할 것: #{s.info_instruction}"
+      "#{s.scene_no}번 이미지\n  편집할 원본#{id_ko(media_ref(s, "clean"))}: 이 장면을 담은 이미지 — #{s.shot_prompt}\n  추가할 것: #{s.info_instruction}"
     end)
   end
 
@@ -302,7 +340,7 @@ defmodule VideoTool.Prompt do
 
       """
       --- 장면 #{pad(s.scene_no)} (#{fmt(s.target_sec)}s, #{s.purpose}) ---
-      대본 구간: #{Map.get(segments, s.id, "(없음)")}
+      #{frames_ko(s)}대본 구간: #{Map.get(segments, s.id, "(없음)")}
       카메라: 초반 #{Map.get(plan, "early", "-")} / 중반 #{Map.get(plan, "mid", "-")} / 후반 #{Map.get(plan, "late", "-")}
       절개 여부: #{Map.get(plan, "cutaway", "없음")}
       빠른 줌: #{if s.use_fast_zoom, do: "사용", else: "사용 안 함"}
