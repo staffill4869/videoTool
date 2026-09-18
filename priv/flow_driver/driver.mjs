@@ -315,12 +315,23 @@ async function revealVideos(page, limit = 40) {
 // Flow 의 결과물 주소는 **두 가지 형식**이다 (둘 다 실측):
 //   https://flow.google.com/asb/<긴 토큰>              ← 영상이 주로 이쪽
 //   https://flow-content.google/(image|video)/<uuid>   ← 이미지가 주로 이쪽
-// 걸러야 하는 건 구글 썸네일(`...=s512-rw`)이다 — 남의 프로젝트 타일이 이 모양으로 섞여 들어왔다.
-// UUID 만 받게 했다가 /asb/ 영상 8개를 전부 놓친 적이 있다. 형식을 좁히지 말고 썸네일만 배제한다.
+// UUID 만 받게 했다가 /asb/ 영상 8개를 전부 놓친 적이 있다. 형식을 좁히지 않는다.
+//
+// 2026-09-18 부터 편집기 타일이 **전부** `/asb/<토큰>=s512-rw` (286x512 썸네일)로 나온다.
+// 예전엔 이 모양을 '남의 프로젝트 썸네일' 로 보고 버렸는데, 그러면 회수가 0장이 된다
+// (61번 INFO 8번째 장이 이렇게 빠졌다). 남의 것은 편집기 판정(classify)과 탭 확인(right_tab?)이 막는다.
+// 크기 접미사는 식별자에서 떼고, 받을 때는 `=s0` 으로 원본(768x1376)을 받는다.
 function isResultUrl(src) {
   const path = String(src).split("?")[0];
-  if (/=s\d+(-|$)/.test(path)) return false; // 구글 썸네일 크기 지정
   return /\/asb\//.test(path) || /flow-content\.google\/(image|video)\//.test(path);
+}
+
+function resultId(src) {
+  return String(src).split("?")[0].split("/").pop().replace(/=s\d+[^/]*$/, "");
+}
+
+function fullSize(src) {
+  return /\/asb\/[^?]*=s\d+[^/?]*$/.test(src) ? src.replace(/=s\d+[^/?]*$/, "=s0") : src;
 }
 
 // 정해진 Flow 프로젝트로 간다. 한 편은 한 프로젝트 안에서 끝내야 한다 —
@@ -345,6 +356,8 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
 
   const page = await flowPage(browser, cfg, { open: false });
   if (!page) throw new Error("Flow 탭이 없습니다.");
+  // 홈 화면의 프로젝트 썸네일도 같은 /asb/ 주소다. 편집기에서만 긁는다.
+  if (classify(page.url()) !== "editor") throw new Error(`편집기가 아닌 화면입니다 (${page.url()}).`);
   await page.bringToFront();
   await page.waitForTimeout(800);
 
@@ -371,11 +384,8 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
 
     for (const it of items) {
       // 서명된 주소라 만료 파라미터가 붙는다. 경로 마지막 조각이 실제 식별자다.
-      const id = it.src.split("?")[0].split("/").pop();
-      // **UUID 형태만 받는다.** 구글 썸네일(`...=s512-rw`)이 같은 셀렉터에 걸려
-      // 남의 프로젝트 타일 6장을 우리 자산으로 등록한 적이 있다.
-      // 진짜 생성물의 식별자는 언제나 UUID 다.
-      if (id && isResultUrl(it.src) && !seen.has(id)) seen.set(id, it);
+      const id = resultId(it.src);
+      if (id && isResultUrl(it.src) && !seen.has(id)) seen.set(id, { ...it, src: fullSize(it.src) });
     }
   };
 
@@ -390,8 +400,8 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
   // 영상은 타일에 마우스를 올려야 주소가 드러난다. 이미지 단계에서는 빈 배열이라 비용이 없다.
   if (kind === "all" || kind === "video") {
     for (const it of await revealVideos(page)) {
-      const id = it.src.split("?")[0].split("/").pop();
-      if (id && isResultUrl(it.src) && !seen.has(id)) seen.set(id, it);
+      const id = resultId(it.src);
+      if (id && isResultUrl(it.src) && !seen.has(id)) seen.set(id, { ...it, src: fullSize(it.src) });
     }
   }
 
@@ -402,11 +412,12 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
 
   const files = [];
   for (const [id, it] of wanted) {
-    const ext = it.type === "video" ? "mp4" : "png";
-    const path = join(dir, `${id}.${ext}`);
     try {
       const res = await page.request.get(it.src, { headers: { referer: page.url() }, timeout: 120000 });
       if (!res.ok()) continue;
+      // /asb/ 원본은 jpeg 로 온다. 확장자를 내용에 맞춘다.
+      const ext = it.type === "video" ? "mp4" : /jpeg/.test(res.headers()["content-type"] || "") ? "jpg" : "png";
+      const path = join(dir, `${id}.${ext}`);
       await writeFile(path, await res.body());
       files.push({ id, path, type: it.type });
     } catch {
@@ -594,7 +605,8 @@ async function resultIds(page) {
       const ids = new Set();
       const add = (src) => {
         if (!src) return;
-        const id = src.split("?")[0].split("/").pop();
+        // resultId 와 같은 규칙 (크기 접미사 =s512-rw 를 뗀다). 이 함수는 페이지 안에서 돌아 밖의 함수를 못 부른다.
+        const id = src.split("?")[0].split("/").pop().replace(/=s\d+[^/]*$/, "");
         if (id) ids.add(id);
       };
       for (const v of document.querySelectorAll("video")) add(v.src || v.currentSrc);

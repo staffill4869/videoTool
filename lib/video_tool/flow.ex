@@ -389,7 +389,7 @@ defmodule VideoTool.Flow do
   end
 
   defp register(project, kind, %{"id" => id, "path" => path, "type" => type}) do
-    if File.exists?(path) do
+    if File.exists?(path) and not duplicate_image?(project.id, kind, path) do
       probe = case Ffmpeg.probe(path) do
         {:ok, p} -> p
         _ -> %{width: 0, height: 0, duration_sec: nil, fps: nil}
@@ -420,6 +420,24 @@ defmodule VideoTool.Flow do
   end
 
   defp register(_project, _kind, _), do: []
+
+  # 같은 그림이 주소 형식만 바뀌어 다시 잡힌다 — 2026-09-18 Flow 가 새로고침 뒤 모든 타일을
+  # UUID 대신 /asb/ 토큰으로 보여 줘서, 식별자 대조(known)로는 이미 받은 7장을 또 받는다.
+  # **같은 종류 안에서만** 거의 똑같은 그림(거리 3 이하)을 거른다. 종류를 섞으면 안 된다 —
+  # 같은 장면의 CLEAN 과 INFO 는 거리 4 까지 가깝다(61번 실측). 다른 장면끼리는 25 이상.
+  # 클립은 거르지 않는다: 같은 장면을 다시 만든 클립은 첫 프레임이 같아서 재생성이 막힌다.
+  defp duplicate_image?(project_id, kind, path) when kind in ["clean", "info"] do
+    h = hash(path, :first)
+
+    dup =
+      h != "" and
+        Enum.any?(Media.list_assets(project_id, kind), &(&1.phash not in [nil, ""] and Phash.distance(&1.phash, h) <= 3))
+
+    if dup, do: File.rm(path)
+    dup
+  end
+
+  defp duplicate_image?(_, _, _), do: false
 
   defp hash(path, at) do
     case Phash.of_file(path, at) do
