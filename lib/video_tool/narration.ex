@@ -6,8 +6,9 @@ defmodule VideoTool.Narration do
   "약은 잠", "푹" 이 "푺" 으로 들어갔고(61·65번), 힉스필드 쪽은 8.00초에서 말을 잘랐다.
   여기서는 DB 의 대본 구간을 그대로 보낸다. 옮겨 적는 단계가 없다.
 
-  장면 음성 길이 규칙은 수동으로 하던 것과 같다: 뒤에 0.3초 여유, 클립(8초)을 넘지 않게
-  7.95초에서 자른다. 마지막 장면은 여유 없이 그대로 (합성이 마지막 클립을 통째로 쓴다).
+  장면 음성 길이 규칙은 수동으로 하던 것과 같다: 뒤에 0.3초 여유, 여유를 붙여도 7.95초까지만.
+  말 자체가 그보다 길면 자르지 않는다(말이 잘린다) — 그 장면은 길게 남고, 대본을 줄여서 푼다.
+  마지막 장면은 여유 없이 그대로 (합성이 마지막 클립을 통째로 쓴다).
   파일은 `work/tts/sNN.mp3` — `Assembly` 가 이 이름으로 장면 시간을 잰다.
   """
 
@@ -40,7 +41,9 @@ defmodule VideoTool.Narration do
                {:ok, spoken} <- Ffmpeg.duration(raw),
                target = if(no == last, do: spoken, else: min(spoken + @gap, @cap)),
                {:ok, _} <- pad(raw, target, out) do
-            {:ok, %{scene_no: no, spoken: spoken, seconds: target}}
+            # apad 는 늘리기만 한다. 말이 상한보다 길면 파일도 그만큼 길다 — 실제 길이를 보고해야
+            # "7.95초" 로 믿고 넘어가지 않는다 (67번: 보고 7.95, 실제 8.54). 줄일 땐 대본을 고친다.
+            {:ok, %{scene_no: no, spoken: spoken, seconds: max(spoken, target)}}
           end
         end)
 
