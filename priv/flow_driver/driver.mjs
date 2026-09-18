@@ -286,8 +286,10 @@ async function revealVideos(page, limit = 40) {
 
     let isVideoTile = false;
     try {
+      // 2026-09-18 부터 영상 타일에 포스터 <img> 가 없고 빈 <video> 만 있다 (src 는 호버해야 채워짐).
+      // 예전 조건(img 필수)이면 영상 4개가 다 있는데 0개로 셌다 (62번 VIDEO).
       isVideoTile = await t.evaluate(
-        (el) => !!el.querySelector("img") && /play_circle/.test(el.innerText || "")
+        (el) => (!!el.querySelector("img") || !!el.querySelector("video")) && /play_circle/.test(el.innerText || "")
       );
     } catch {
       continue;
