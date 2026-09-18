@@ -246,9 +246,11 @@ defmodule VideoTool.Prompt do
   # VIDEO 에서 "대본 구간" 은 뺀다 — 나레이션은 한국어라 그대로 넣으면 영어 프롬프트에
   # 한국어가 섞인다. 화면에 필요한 건 shot_prompt 와 카메라 계획에 이미 다 있다.
   # 원본을 **번호가 아니라 그림 내용과 ID 로** 가리킨다 (source_hint, media_ref 참고).
-  defp render_scenes("info", scenes, _segments, _aspect, true) do
+  # 비율도 장면마다 다시 적는다 — 64번 INFO 가 9:16 원본을 1376x768 가로로 늘려 새로 그렸다
+  # (본문에 "비율 유지" 가 있었는데도). CLEAN 처럼 장면마다 박아 둔다.
+  defp render_scenes("info", scenes, _segments, aspect, true) do
     Enum.map_join(scenes, "\n\n", fn s ->
-      "Image #{s.scene_no}\n  Edit the source image#{id_en(media_ref(s, "clean"))} that shows: #{s.shot_prompt}\n  Add: #{s.info_instruction}"
+      "Image #{s.scene_no}\n  Edit the source image#{id_en(media_ref(s, "clean"))} that shows: #{s.shot_prompt}\n  Add: #{s.info_instruction}\n  Output: #{aspect}, same size as the source. #{aspect_words(aspect)}"
     end)
   end
 
@@ -328,9 +330,9 @@ defmodule VideoTool.Prompt do
   # 만들었을 때만 순서가 맞는다 — 62번에서 1번 장면만 다시 만들었더니 Flow 가 가장 최근 그림(1번)
   # 하나로 네 장을 전부 새로 그렸다 (배경·머리 모양이 모두 1번 것). 장면 하나 재생성은 무인 루프에서도
   # 생기므로, 각 원본을 그림 내용(shot_prompt)으로 지목한다.
-  defp render_scenes("info", scenes, _segments, _aspect) do
+  defp render_scenes("info", scenes, _segments, aspect) do
     Enum.map_join(scenes, "\n\n", fn s ->
-      "#{s.scene_no}번 이미지\n  편집할 원본#{id_ko(media_ref(s, "clean"))}: 이 장면을 담은 이미지 — #{s.shot_prompt}\n  추가할 것: #{s.info_instruction}"
+      "#{s.scene_no}번 이미지\n  편집할 원본#{id_ko(media_ref(s, "clean"))}: 이 장면을 담은 이미지 — #{s.shot_prompt}\n  추가할 것: #{s.info_instruction}\n  결과 비율: #{aspect}, 원본과 같은 크기. #{aspect_words(aspect)}"
     end)
   end
 
