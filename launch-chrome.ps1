@@ -6,6 +6,12 @@
 #   - 자동화가 평소 브라우징과 섞이지 않는다.
 #
 # 처음 한 번은 사람이 직접 구글 로그인을 해야 한다. 자동화는 로그인을 하지 않는다.
+#
+# 기본은 **화면 밖**에 띄운다(모니터 왼쪽 바깥 좌표). 최소화하면 안 된다 — 최소화된 창은
+# Chrome 이 그리기를 멈춰서 호버·스크린샷이 먹통이 된다(스크린샷 30초 타임아웃 실측).
+# 로그인이 풀려 사람이 봐야 할 때는 Chrome 을 닫고 `.\launch-chrome.ps1 -Show` 로 다시 띄운다.
+
+param([switch]$Show)
 
 $port    = 9222
 # 프로필 경로를 하드코딩하지 않는다. 폴더 이름이 바뀌면 없는 경로로 Chrome 이 떠서
@@ -24,13 +30,20 @@ if ($alive) {
 
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
 
-Start-Process -FilePath $chrome -ArgumentList @(
+$chromeArgs = @(
   "--remote-debugging-port=$port",
   "--user-data-dir=`"$profile`"",
   "--no-first-run",
   "--no-default-browser-check",
-  $flowUrl
+  # 가려지거나 화면 밖에 있어도 느려지지 않게 한다. 이게 없으면 다른 창에 덮인 것만으로
+  # 타이머·렌더링이 늦춰져 대기·호버가 어긋난다.
+  "--disable-backgrounding-occluded-windows",
+  "--disable-renderer-backgrounding",
+  "--disable-background-timer-throttling"
 )
+if (-not $Show) { $chromeArgs += @("--window-position=-3000,0", "--window-size=1920,1080") }
+
+Start-Process -FilePath $chrome -ArgumentList ($chromeArgs + $flowUrl)
 
 # 프로필 시작 페이지(zum 같은 포털)가 같이 뜨면 **닫는다.** 광고 iframe 을 십수 개 끌고 와서
 # Playwright 가 붙을 때 전부 따라 붙느라 연결이 늦어지고, 드라이버가 그걸 "걸렸다" 고 보고
@@ -50,6 +63,7 @@ try {
 }
 
 Write-Host "Chrome 을 띄웠습니다 (포트 $port, 프로필 $profile)"
+if (-not $Show) { Write-Host "화면 밖에 띄웠습니다. 보려면 Chrome 을 닫고 -Show 로 다시 실행하세요." }
 Write-Host ""
 Write-Host "처음이라면 이 창에서 직접 구글 로그인을 하세요. 자동화는 로그인을 대신하지 않습니다."
 Write-Host "다운로드가 '저장 위치 묻기' 로 설정돼 있으면 꺼주세요 — 자동 수집이 안 됩니다."

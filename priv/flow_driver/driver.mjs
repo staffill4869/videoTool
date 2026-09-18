@@ -362,6 +362,7 @@ async function harvest(browser, cfg, { dir, kind = "all", known = [] }) {
   if (classify(page.url()) !== "editor") throw new Error(`편집기가 아닌 화면입니다 (${page.url()}).`);
   await page.bringToFront();
   await page.waitForTimeout(800);
+  if (kind === "video") await showVideos(page);
 
   // 가상 스크롤 때문에 화면 밖 타일은 DOM 에 없다. 끝까지 훑는다.
   const seen = new Map();
@@ -697,6 +698,21 @@ async function clickChoice(page, cfg, wantPattern) {
   return null;
 }
 
+// 2026-09-18 새 화면: '전체 미디어' 에서는 영상이 원본 이미지 묶음 안에 들어가 <video> 가 안 보인다.
+// 영상 단계는 왼쪽 '동영상' 목록에서 세고 긁는다 — 62번은 4개가 다 있는데 15분 동안 0개로 세다 실패했다.
+// 이 메뉴는 영상이 하나라도 생겨야 나타나므로 기다리는 동안 계속 확인한다.
+async function showVideos(page) {
+  try {
+    const nav = page.getByText("동영상", { exact: true }).first();
+    if (await nav.isVisible({ timeout: 1000 })) {
+      await nav.click();
+      await page.waitForTimeout(1500);
+    }
+  } catch {
+    /* 메뉴가 없으면 예전 화면이거나 아직 영상이 없다 — 그대로 센다 */
+  }
+}
+
 async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0, stage = "", known = [] }) {
   const page = await flowPage(browser, cfg, { open: false });
   if (!page) throw new Error("Flow 탭이 없습니다.");
@@ -711,9 +727,19 @@ async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0
     };
   }
 
+  // 영상 타일의 <video> 는 마우스를 올려야 주소가 채워진다. 주소로만 세면 다 만들어진 영상을
+  // 끝까지 못 센다(64번 2번 클립: 화면엔 4개, 대기는 15분 동안 0개). 영상 단계는 호버해서 센다.
+  const currentIds = async () => {
+    const ids = await resultIds(page);
+    if (stage !== "video") return ids;
+    await showVideos(page);
+    const revealed = (await revealVideos(page)).map((v) => resultId(v.src));
+    return [...new Set([...ids, ...revealed])];
+  };
+
   // 시작 시점에 이미 있던 id 를 기준선으로 잡는다. 이후 '새로 생긴 id' 만 센다 —
   // 개수로 세면 INFO 처럼 제자리에서 바뀌는 단계를 영원히 못 끝낸다.
-  const baseline = new Set([...(known || []), ...(await resultIds(page))]);
+  const baseline = new Set([...(known || []), ...(await currentIds())]);
 
   const deadline = Date.now() + timeoutMs;
   let last = -1;
@@ -724,7 +750,7 @@ async function waitResults(browser, cfg, { expect, timeoutMs = 900000, since = 0
 
   while (Date.now() < deadline) {
     // 기준선에 없던 id 의 개수 = 이번 단계에서 새로 만들어진 것.
-    const fresh = (await resultIds(page)).filter((id) => !baseline.has(id));
+    const fresh = (await currentIds()).filter((id) => !baseline.has(id));
     const n = fresh.length;
     if (n !== last) last = n;
     if (n >= expect) {
