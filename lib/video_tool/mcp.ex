@@ -1187,7 +1187,16 @@ defmodule VideoTool.MCP do
     with {:ok, project} <- Projects.get_project(args["project_id"]) do
       case VideoTool.Flow.open_for(project) do
         {:ok, result} ->
-          result |> Map.put(:ok, true) |> Map.put(:guideline, "#{project.aspect} 규칙을 넣었습니다")
+          # 상시 지시가 실패해도 편집기는 열린다(일부러 그렇게 뒀다). 그런데 여기서 무조건
+          # "넣었습니다" 라고 적어서, 한 줄도 안 들어갔는데 성공으로 보고됐다 — 화면에는
+          # 빈 요청 사항 패널만 남아 있었다. 실패했으면 실패했다고 적는다.
+          guideline =
+            case result[:guideline_error] do
+              nil -> "#{project.aspect} 규칙을 넣었습니다"
+              why -> "상시 지시를 못 넣었습니다 — 화면비·캐릭터 규칙이 빠진 채 생성됩니다: #{why}"
+            end
+
+          result |> Map.put(:ok, true) |> Map.put(:guideline, guideline)
 
         {:error, reason} ->
           %{ok: false, error: inspect_error(reason)}

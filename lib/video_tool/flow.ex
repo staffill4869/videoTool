@@ -71,6 +71,11 @@ defmodule VideoTool.Flow do
   """
   def open_for(project) do
     with {:ok, opened} <- new_project() do
+      # **연 주소를 바로 적어 둔다.** 안 적으면 DB 에는 옛 창이 남아, 다음 단계가 그 옛 창으로
+      # 가서 작업한다 — 실제로 flow_new_project 로 새 창(상시 지시가 켜진)을 열었는데 CLEAN 은
+      # DB 에 남은 옛 창(상시 지시가 빈)에서 돌았고, harvest 가드는 둘이 다르다고 멈췄다.
+      if url = opened[:url] || opened["url"], do: remember_url(project, url)
+
       # 상시 지시는 **부수적인 단계**다. 여기서 실패했다고 편집기를 여는 일까지
       # 통째로 실패시키면 안 된다 — 실제로 '안내 추가' 버튼 이름이 바뀌자
       # CLEAN 단계가 시작조차 못 했다. 화면비는 프롬프트 본문에도 장면마다 들어간다.

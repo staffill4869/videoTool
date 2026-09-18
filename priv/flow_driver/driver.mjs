@@ -442,21 +442,48 @@ async function setGuideline(browser, cfg, { title = "제작 규칙", text }) {
     body = await locate(page, cfg.guidelineBody, "가이드라인 입력칸");
   }
 
-  const titleBox = await find(page, cfg.guidelineTitle);
-  if (titleBox) {
-    await titleBox.fill("").catch(() => {});
-    await titleBox.fill(title).catch(() => {});
+  try {
+    const titleBox = await find(page, cfg.guidelineTitle);
+    if (titleBox) {
+      await titleBox.fill("").catch(() => {});
+      await titleBox.fill(title).catch(() => {});
+    }
+
+    await body.fill("").catch(() => {});
+    await body.fill(text);
+    await page.waitForTimeout(400);
+
+    // 요청 사항은 **꺼진 채로** 추가된다(2026-09-18 화면 변경). 켜지 않으면 글만 들어가고
+    // 적용은 안 된다.
+    // 스위치 라벨은 켜져도 꺼져도 "활성으로 전환" 그대로다 — 상태는 aria-checked 에만 있다.
+    // 라벨을 보고 누르면 이미 켜진 걸 다시 눌러 끈다. 상태를 보고, 누른 뒤 다시 확인한다.
+    const active = await ensureActive(page, cfg);
+    if (!active) throw new Error("요청 사항을 켜지 못했습니다 (aria-checked 가 true 가 되지 않음)");
+
+    return { ok: true, title, chars: text.length, active };
+  } finally {
+    // **실패해도 패널은 닫는다.** 열린 채로 두면 프롬프트 입력칸이 가려져, 다음 단계가
+    // "생성 버튼을 찾지 못했습니다" 로 죽는다 — 실제로 상시 지시가 실패한 뒤 CLEAN 이
+    // 그렇게 죽었고, 입력칸이 안 보이니 "저장된 창이 죽었다" 고 판단해 빈 프로젝트까지 새로 열었다.
+    const done = await find(page, cfg.guidelineDone, 1500);
+    if (done) await done.click().catch(() => {});
+    else await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(1000);
   }
+}
 
-  await body.fill("").catch(() => {});
-  await body.fill(text);
-  await page.waitForTimeout(400);
+// 요청 사항 스위치를 켠다. 이미 켜져 있으면 건드리지 않는다. 켜졌으면 true.
+// 스위치가 없는 옛 화면이면 적용 여부를 따질 게 없으므로 true 로 본다.
+async function ensureActive(page, cfg) {
+  const toggle = await find(page, cfg.guidelineActivate || [], 1500);
+  if (!toggle) return true;
 
-  const done = await locate(page, cfg.guidelineDone, "완료 버튼");
-  await done.click();
-  await page.waitForTimeout(1000);
-
-  return { ok: true, title, chars: text.length };
+  const on = async () => (await toggle.getAttribute("aria-checked")) === "true";
+  for (let i = 0; i < 2 && !(await on()); i++) {
+    await toggle.click();
+    await page.waitForTimeout(700);
+  }
+  return on();
 }
 
 // locate 와 같지만 못 찾으면 예외 대신 null. 있으면 쓰고 없으면 만드는 흐름에 쓴다.

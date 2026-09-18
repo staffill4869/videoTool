@@ -63,12 +63,25 @@
     "후보를 넓게 둔다 — 못 찾으면 그 단계가 통째로 실패한다."
   ],
   "generateButton": [
-    { "css": "button[aria-label='생성 시작']" },
-    { "css": "button[aria-label*='생성'], button[aria-label*='보내기'], button[aria-label*='전송']" },
-    { "css": "button[aria-label*='Send'], button[aria-label*='Generate'], button[aria-label*='Submit']" },
-    { "role": "button", "name": "^생성 시작$|^생성$|^보내기$|^전송$|^Generate$|^Send$" },
-    { "css": "button[type='submit']" },
-    { "css": "form button:not([disabled]):last-of-type" }
+    {
+      "css": "button[aria-label='생성 시작']"
+    },
+    {
+      "css": "button[aria-label*='생성'], button[aria-label*='보내기'], button[aria-label*='전송']"
+    },
+    {
+      "css": "button[aria-label*='Send'], button[aria-label*='Generate'], button[aria-label*='Submit']"
+    },
+    {
+      "role": "button",
+      "name": "^생성 시작$|^생성$|^보내기$|^전송$|^Generate$|^Send$"
+    },
+    {
+      "css": "button[type='submit']"
+    },
+    {
+      "css": "form button:not([disabled]):last-of-type"
+    }
   ],
   "_resultItem설명": "2026-09-11 실측: 결과 주소가 flow-content.google 에서 flow.google.com/asb/ 로 바뀌었다. 옛 호스트만 찾다가 이미지가 17장 있는데도 0건으로 셌다 — 호스트는 언제든 또 바뀐다.",
   "resultItem": [
@@ -93,7 +106,6 @@
     "생성이 멈췄는데 결과가 모자라면 이 문장을 한 번 보내 진행시킨다."
   ],
   "confirmText": "네, 그대로 진행해 주세요.",
-
   "_nudge설명": [
     "2026-09-11 실측: 생성이 끝나면 Flow 가 '다음에 뭘 할까요? (1) 생성된 이미지로 영상 만들기 …' 를 묻는다.",
     "거기에 confirmText('네, 그대로 진행해 주세요')를 던지면 1번을 고른 셈이 되어 시키지도 않은 영상이 만들어진다.",
@@ -101,25 +113,52 @@
     "{N} 자리에 모자란 개수가 들어간다."
   ],
   "nudgeText": "아직 {N}개가 모자랍니다. 모자란 것만 이어서 만들어 주세요. 영상으로 만들지 말고 이 단계에서 멈추세요.",
-
   "_approve설명": [
     "2026-09-11 실측: Flow 가 크레딧을 쓰기 전에 '승인 / 항상 승인 / 거부' 를 묻고 멈춘다.",
     "'항상 승인' 을 누르면 그 프로젝트에서 다시 묻지 않는다 — 무인 운전에는 이쪽이어야 한다.",
     "dismiss 와 분리해 둔다. dismiss 는 덮개 치우기고 이건 돈이 나가는 결정이라 성격이 다르다."
   ],
   "approveAlways": [
-    { "role": "button", "name": "^항상 승인$" },
-    { "role": "menuitem", "name": "^항상 승인$" },
-    { "role": "button", "name": "^Always allow$|^Always approve$" },
-    { "role": "menuitem", "name": "^Always allow$|^Always approve$" },
-    { "text": "^항상 승인$" }
+    {
+      "role": "button",
+      "name": "^항상 승인$"
+    },
+    {
+      "role": "menuitem",
+      "name": "^항상 승인$"
+    },
+    {
+      "role": "button",
+      "name": "^Always allow$|^Always approve$"
+    },
+    {
+      "role": "menuitem",
+      "name": "^Always allow$|^Always approve$"
+    },
+    {
+      "text": "^항상 승인$"
+    }
   ],
   "approveOnce": [
-    { "role": "button", "name": "^승인$" },
-    { "role": "menuitem", "name": "^승인$" },
-    { "role": "button", "name": "^Approve$|^Allow$" },
-    { "role": "menuitem", "name": "^Approve$|^Allow$" },
-    { "text": "^승인$" }
+    {
+      "role": "button",
+      "name": "^승인$"
+    },
+    {
+      "role": "menuitem",
+      "name": "^승인$"
+    },
+    {
+      "role": "button",
+      "name": "^Approve$|^Allow$"
+    },
+    {
+      "role": "menuitem",
+      "name": "^Approve$|^Allow$"
+    },
+    {
+      "text": "^승인$"
+    }
   ],
   "_doneMarker설명": [
     "2026-09-11 실측: 생성이 끝나면 '이미지 생성이 모두 완료되었습니다. 다음 작업을 위해 어떤 걸 도와드릴까요?' 가 뜨고",
@@ -134,16 +173,30 @@
     "코드에서도 결과가 1개 이상 나온 뒤에만 이 표시를 인정한다 — 이중 안전장치다."
   ],
   "doneMarker": [
-    { "text": "이미지 생성이 모두 완료" },
-    { "text": "영상 생성이 모두 완료" },
-    { "text": "생성이 모두 완료되었" },
-    { "text": "모든 이미지가 생성되었" },
-    { "text": "모든 영상이 생성되었" }
+    {
+      "text": "이미지 생성이 모두 완료"
+    },
+    {
+      "text": "영상 생성이 모두 완료"
+    },
+    {
+      "text": "생성이 모두 완료되었"
+    },
+    {
+      "text": "모든 이미지가 생성되었"
+    },
+    {
+      "text": "모든 영상이 생성되었"
+    }
   ],
   "_choiceOption설명": "Flow 가 내는 선택지 행. 무엇을 묻는지 읽고 원하는 것만 누르기 위해 쓴다.",
   "choiceOption": [
-    { "css": "[role='radio'], [role='menuitemradio'], [role='option']" },
-    { "css": "li[role='button'], [data-testid*='suggestion'], [data-testid*='choice']" }
+    {
+      "css": "[role='radio'], [role='menuitemradio'], [role='option']"
+    },
+    {
+      "css": "li[role='button'], [data-testid*='suggestion'], [data-testid*='choice']"
+    }
   ],
   "_stageChoice설명": [
     "단계별로 '이 선택지가 뜨면 눌러라' 규칙. 비어 있으면 아무것도 누르지 않는다.",
@@ -194,6 +247,10 @@
   "guidelineAdd": [
     {
       "role": "button",
+      "name": "요청 사항 추가"
+    },
+    {
+      "role": "button",
       "name": "안내 추가"
     }
   ],
@@ -215,5 +272,19 @@
       "role": "button",
       "name": "^완료$"
     }
+  ],
+  "_guidelineAdd설명": [
+    "2026-09-18 실측: 버튼 이름이 '안내 추가' → '요청 사항 추가' 로 바뀌었다.",
+    "못 찾으면 상시 지시가 한 줄도 안 들어가는데, 그 실패는 계속 진행으로 삼켜져 조용히 지나갔다."
+  ],
+  "guidelineActivate": [
+    {
+      "css": "button[aria-label='요청 사항을 활성으로 전환']"
+    }
+  ],
+  "_guidelineActivate설명": [
+    "2026-09-18 새로 생긴 스위치. 요청 사항은 **꺼진 채로** 추가된다.",
+    "라벨은 켜져도 꺼져도 '활성으로 전환' 그대로다 — 상태는 aria-checked 에만 있다.",
+    "라벨을 보고 누르면 이미 켜진 걸 다시 눌러 끈다. ensureActive 가 aria-checked 를 보고 누르고 다시 확인한다."
   ]
 }

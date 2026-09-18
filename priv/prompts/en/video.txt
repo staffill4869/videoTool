@@ -12,6 +12,8 @@ Do not add or drop scenes. Make exactly one video per scene in the list. Do not 
 Each video keeps the start image's subject, structure, layout, background, lighting, colors and design,
 while the end image's infographic elements are built up step by step, so the final frame matches the end image.
 No plain crossfade. No simple zoom on a still image.
+The character never changes colour, markings or accessories during the video. It must stay exactly this:
+{{character}}
 
 WHAT MATTERS MOST
 1. A camera that genuinely moves through 3D space.

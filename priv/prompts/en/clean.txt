@@ -24,5 +24,8 @@ GLOBAL STYLE (apply to every scene):
 - Consistent miniature world across all scenes: same room, same props, same materials.
 - No photorealism, no CGI gloss, no plastic shine.
 
+CHARACTER — identical in every single image. Do not invent a different cat.
+{{character}}
+
 ── SCENE LIST (this list IS the scene count; one image each, in this order) ──
 {{scenes}}

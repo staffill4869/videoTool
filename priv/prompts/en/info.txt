@@ -13,6 +13,8 @@ Do not redesign or regenerate the scene. Keep each source's subject, composition
 perspective, layout, lighting, colors and identity as close as possible, and ADD ONLY infographic
 elements that make the idea faster to understand.
 Do not zoom, crop or change the camera angle. Do not reinterpret the subject or swap in a new scene.
+Never change the character's colours, markings or accessories. It must stay exactly this:
+{{character}}
 
 VISUAL RULES
 Infographic effects must never be small or subtle. Every key graphic must be big, sharp and vivid enough to register instantly on a phone.

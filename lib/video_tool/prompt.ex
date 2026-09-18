@@ -114,8 +114,33 @@ defmodule VideoTool.Prompt do
       "project.orientation" => orientation(project.aspect, en?(project)),
       "scenes" => render_scenes(stage, scenes, segments, project.aspect || "16:9", en?(project)),
       "allowed_facts" => render_allowed_facts(stage, script, en?(project)),
+      "character" => character(project),
       "script" => (script && script.raw_text) || "(대본 없음)"
     }
+  end
+
+  # 고정 캐릭터 설명. **프롬프트 본문에 직접** 넣는다.
+  #
+  # 예전엔 Flow 상시 지시(요청 사항)에만 넣었다. 그런데 2026-09-18 Flow 화면이 바뀐 뒤로
+  # 상시 지시가 이미지 생성에 적용되지 않아, 장면 지시의 "Momo" 라는 이름만 보고 생성기가
+  # 고양이를 지어냈다 — 회색 고등어 줄무늬 대신 주황 고양이 7장에 삼색이 1장이 나왔다.
+  # 요청마다 따라가는 본문에 두면 상시 지시가 되든 안 되든 상관없다.
+  defp character(project) do
+    en = get_in(project.variables || %{}, ["standing_en"])
+
+    cond do
+      en?(project) and is_binary(en) and en != "" ->
+        en
+
+      project.series_id ->
+        case VideoTool.Series.get(project.series_id) do
+          {:ok, %{standing_prompt: s}} when is_binary(s) and s != "" -> s
+          _ -> ""
+        end
+
+      true ->
+        ""
+    end
   end
 
   @doc """
