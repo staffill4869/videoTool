@@ -136,9 +136,18 @@ defmodule VideoTool.MCP do
         "project_id" => int("프로젝트 id"),
         "path" => str("생략하면 Downloads 에서 최신 zip 을 찾는다")
       }, ["project_id"]),
-      tool("generate_narration", "TTS · 무음 정렬 · 자막 생성 (4주차)", %{
-        "project_id" => int("프로젝트 id")
-      }, ["project_id"]),
+      tool(
+        "generate_narration",
+        "나레이션을 일레븐랩스로 만들어 등록까지 한다. 대본은 DB 의 장면별 구간을 그대로 쓴다 — " <>
+          "문장을 옮겨 적지 않으므로 오타가 들어가지 않는다. 장면 길이 맞춤·자막도 여기서 끝난다. " <>
+          "힉스필드 TTS + save_narration 대신 이걸 쓴다",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "voice_id" => str("일레븐랩스 목소리 id. 생략하면 프로젝트 변수 eleven_voice_id"),
+          "model_id" => str("생략하면 eleven_multilingual_v2")
+        },
+        ["project_id"]
+      ),
       tool(
         "save_narration",
         "에이전트가 만든 음성 파일을 등록하고 무음 정렬 · 장면 시간 · 자막을 만든다. " <>
@@ -1270,15 +1279,21 @@ defmodule VideoTool.MCP do
     end
   end
 
-  defp handle(name, _args) when name in ~w(generate_narration make_vertical) do
+  defp handle("generate_narration", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]),
+         {:ok, result} <-
+           VideoTool.Narration.generate(project, voice_id: args["voice_id"], model_id: args["model_id"]) do
+      Map.put(result, :ok, true)
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle(name, _args) when name in ~w(make_vertical) do
     %{ok: false, error: not_implemented(name)}
   end
 
   defp handle(name, _args), do: %{ok: false, error: "알 수 없는 툴: #{name}"}
-
-
-  defp not_implemented("generate_narration"),
-    do: "generate_narration 은 아직 구현되지 않았습니다 (설명서 4주차 — 힉스필드 TTS · 무음 정렬 · 자막)"
 
   defp not_implemented("assemble"),
     do: "assemble 은 아직 구현되지 않았습니다 (설명서 4주차 — 리타이밍 · ffmpeg 합성)"

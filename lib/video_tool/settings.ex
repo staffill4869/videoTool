@@ -17,11 +17,14 @@ defmodule VideoTool.Settings do
     {:google_client_id, "settings/google_client_id", "GOOGLE_CLIENT_ID", "구글 OAuth 클라이언트 ID",
      "유튜브 업로드·자막·섬네일. 애플리케이션 유형은 '데스크톱 앱'."},
     {:google_client_secret, "settings/google_client_secret", "GOOGLE_CLIENT_SECRET",
-     "구글 OAuth 클라이언트 시크릿", "위 클라이언트 ID 와 한 쌍."}
+     "구글 OAuth 클라이언트 시크릿", "위 클라이언트 ID 와 한 쌍."},
+    {:elevenlabs_api_key, "settings/elevenlabs_api_key", "ELEVENLABS_API_KEY", "일레븐랩스 API 키",
+     "나레이션(generate_narration). 권한: Text to Speech 필수, 목소리를 찾으려면 Voices 읽기."}
   ]
 
-  # 힉스필드 키는 두지 않는다. 나레이션은 에이전트가 힉스필드 MCP 로 만들고
-  # 우리는 결과물(오디오 파일)만 받는다 — 서버에는 LLM 도 생성 API 키도 두지 않는다.
+  # 힉스필드 키는 두지 않는다 — 이미지·영상은 Flow, 캐릭터 립싱크는 에이전트가 힉스필드 MCP 로.
+  # 나레이션만은 서버가 일레븐랩스를 직접 부른다: 문장을 에이전트가 옮겨 적다 오타가 났고
+  # (61·65번), 힉스필드 경유는 한국어 원어민 목소리를 고를 수 없고 8초에서 잘렸다.
 
   def secrets, do: @secrets
 
