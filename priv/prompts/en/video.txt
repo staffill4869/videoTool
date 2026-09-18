@@ -1,0 +1,83 @@
+TASK: Actually generate one video per scene. Do not just write prompts.
+
+THE MOST IMPORTANT RULE — break it and everything must be redone.
+Each scene has TWO images. Use them as the FIRST FRAME and LAST FRAME of one video.
+  Start image = first frame (the clean scene, no infographics)
+  End image   = last frame  (the same scene with the infographics added)
+Never animate a single image. The video must travel between the two.
+Pick the generation mode that accepts both a first frame and a last frame.
+Never pair images from different scenes. Only same-numbered scenes go together.
+Do not add or drop scenes. Make exactly one video per scene in the list. Do not stop after one — finish them all.
+
+Each video keeps the start image's subject, structure, layout, background, lighting, colors and design,
+while the end image's infographic elements are built up step by step, so the final frame matches the end image.
+No plain crossfade. No simple zoom on a still image.
+
+WHAT MATTERS MOST
+1. A camera that genuinely moves through 3D space.
+2. Real motion of the subject and environment, with infographic motion graphics that explain that motion.
+Every scene = moving 3D scene + camera travelling through real space + infographics explaining the motion.
+
+1) CAMERA IN 3D SPACE
+Not 2D zoom or pan — the camera's position actually moves through depth. Choose per scene:
+fast push from wide to the key subject / descend or rise / enter from outside into an interior or cutaway /
+forward dive toward a part / track along a path / orbit then approach / strong foreground-background parallax /
+cinematic fly-through / wide-to-detail or detail-to-wide.
+Tie every camera move to the information flow. Never write vague "dynamic camera" — state start position,
+direction, target, entry point and final position.
+Clay stop-motion feel: slightly stepped motion is welcome, like real frame-by-frame animation.
+
+2) CUTAWAYS AND INTERIORS
+When the idea is about something inside (a body, a throat, a mechanism), do not just float graphics over the outside.
+Show the whole → approach → the surface turns translucent or opens → the inside is revealed → move in close →
+the motion starts → graphics follow that motion → end matching the end image.
+The opening is a real spatial change in 3D, not a fade.
+
+3) THE SCENE ITSELF MOVES
+Camera motion alone is not enough. Things in the start image move naturally:
+the cat breathes, blinks, twitches its ears and whiskers, shifts its paws; fabric, light, dust and air move.
+Infographics follow and explain that real motion.
+Never create new characters, buildings, or key objects, and never delete existing ones.
+
+4) INFOGRAPHIC MOTION
+Big and sharp enough to read instantly on a phone. High-saturation, high-contrast accent colors;
+different information gets different colors.
+Use: thick arrows / rings, circles, arcs / glowing outlines / boundaries / translucent highlight zones /
+connecting and path lines / light trails / scan effects / energy lines / pulses / callout lines / ripples.
+Every graphic explains the scene — never decoration.
+Build them in order, not all at once:
+highlight the target → draw arrows, rings, paths → extend and connect → match the end image's finished state.
+Prefer lines that actually draw, rings that expand, paths that advance, zones that light up — over fades.
+
+5) NO TEXT
+No readable text at any moment. No titles, labels, numbers, units or letters — not even for a single frame.
+The end image has no text, so neither does the video.
+
+6) FAST ZOOM — use sparingly
+Only on the scenes marked "Fast zoom: yes". Short, punchy snap-zoom toward or away from the key subject,
+with graphics firing at the same moment. Avoid heavy shake. Never on two neighbouring scenes in the same way.
+
+7) STRUCTURE OF EACH 8-SECOND CLIP
+Stay in ONE continuous 3D space with 2–3 connected camera beats:
+  early: wide view that establishes the situation
+  mid:   approach the key subject or enter the interior
+  late:  the clearest view of the principle and the finished infographic
+No hard cuts between beats — one continuous camera move.
+Only part of each clip is used in the final edit (usually the later part), so the LAST beat must work on its own.
+
+8) FLOW BETWEEN SCENES
+Clips are joined into one video, so design them to flow:
+the last camera position of one scene leads into the first of the next.
+Vary the link: continue into the next space / scale out or in / hand over a visual element (a path, a line of light) /
+keep the same camera direction.
+Match light direction, colour temperature, haze and time of day across the cut.
+Never dip to black or flash to white between scenes.
+Exceptions: open the first scene wide; close the last scene by pulling back.
+
+SOUND
+Only sound effects that would really happen in the scene.
+No speech, dialogue, narration or human voice — narration is added later.
+No background music, no instruments.
+
+── PER-SCENE MATERIAL ──
+{{scenes}}

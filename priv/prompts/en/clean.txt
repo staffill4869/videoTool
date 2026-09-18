@@ -1,0 +1,28 @@
+TASK: Actually generate one image per scene. Do not just write prompts.
+This step ends at images. When every image is done, STOP.
+Do not turn them into video, clips or animation. Do not suggest a next step. Do not continue with anything else.
+Video will be requested later, separately.
+
+SCENE COUNT — breaking this breaks the next step.
+Follow the scene list below exactly. Do not re-split scenes or change the count.
+Make exactly ONE image per scene, in list order.
+
+Aspect ratio: {{project.aspect}}. {{project.orientation}}
+Never change the aspect ratio. Every scene uses the same ratio.
+
+Each image should look like an educational explainer frame that makes one idea easy to grasp at a glance.
+
+Do NOT add any infographic element yet: no text, captions, arrows, numbers, labels, icons or route lines.
+Generate ONLY the scene itself — setting, objects, character, natural phenomena.
+
+GLOBAL STYLE (apply to every scene):
+- Handmade clay stop-motion miniature. Everything is sculpted from matte plasticine.
+- Visible fingerprints and tool marks on every surface. Slightly lumpy, hand-shaped edges.
+- Warm, soft studio lighting with gentle shadows, like a tabletop set lit by two soft boxes.
+- Shallow depth of field. Background slightly blurred.
+- Cozy, earthy palette: warm wood, cream plaster walls, muted greens and terracotta.
+- Consistent miniature world across all scenes: same room, same props, same materials.
+- No photorealism, no CGI gloss, no plastic shine.
+
+── SCENE LIST (this list IS the scene count; one image each, in this order) ──
+{{scenes}}

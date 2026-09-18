@@ -66,7 +66,16 @@ defmodule VideoTool.Check do
   # 길이**를 장면마다 비교한다. 같은 글을 읽었으면 붙어 있고, 다른 글이면 벌어진다.
   defp audio_matches_script(project) do
     dir = Path.join(["projects", "#{project.id}", "work", "tts"])
-    cps = (project.voice && project.voice.chars_per_sec) || 5.0
+    # **낭독 속도는 언어마다 다르다.** 보이스에 적힌 값은 한국어로 잰 것(5.0자/초)이라
+    # 영어(10.1자/초)에 그대로 쓰면 두 배로 틀린다 — 실측: 영어판 60번에서 멀쩡한 장면을
+    # "9.6초 차이" 로 잡았다. 이번 나레이션에서 실제로 잰 값이 있으면 그걸 쓴다.
+    narration = Media.latest_narration(project.id)
+
+    cps =
+      case narration && narration.measured_chars_per_sec do
+        n when is_float(n) and n > 0 -> n
+        _ -> (project.voice && project.voice.chars_per_sec) || 5.0
+      end
 
     # **자막 줄이 아니라 장면 글로 비교한다.** 자막은 문장 단위로 쪼개져서 장면보다 줄이 많다
     # (8장면에 12줄). 번호로 맞추면 3번째부터 어긋나서, 멀쩡한 편을 틀렸다고 잡는다.

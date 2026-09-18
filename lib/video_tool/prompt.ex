@@ -111,12 +111,23 @@ defmodule VideoTool.Prompt do
       "scene_count" => Integer.to_string(length(scenes)),
       # 화면비 숫자만으로는 생성기가 구도를 못 잡는다. "9:16 가로형" 같은 모순을 막으려면
       # 방향을 말로 붙여야 한다 — 실제로 그렇게 나가고 있었다.
-      "project.orientation" => orientation(project.aspect),
-      "scenes" => render_scenes(stage, scenes, segments, project.aspect || "16:9"),
-      "allowed_facts" => render_allowed_facts(stage, script),
+      "project.orientation" => orientation(project.aspect, en?(project)),
+      "scenes" => render_scenes(stage, scenes, segments, project.aspect || "16:9", en?(project)),
+      "allowed_facts" => render_allowed_facts(stage, script, en?(project)),
       "script" => (script && script.raw_text) || "(대본 없음)"
     }
   end
+
+  @doc """
+  Flow 에 보내는 프롬프트를 영어로 쓸 것인가. 나레이션·자막 언어(`project.language`)와 **별개**다.
+
+  Flow(Imagen·Veo)는 영어가 모국어인 모델이다. 한국어 프롬프트가 조용한 오해석의 원인인지
+  보려고 만든 스위치다 — 나레이션은 한국어로 두고 그림 지시만 영어로 바꿔 한 변수만 비교한다.
+  템플릿 본문은 `prompt_overrides` 로 갈아끼우고, 여기서는 **렌더러가 박아 넣는 머리말**
+  ("N번 이미지", "대본 구간", "허용 수치" …)을 영어로 바꾼다. 안 바꾸면 영어 본문에
+  한국어가 섞여 실험이 안 된다.
+  """
+  def en?(project), do: get_in(project.variables || %{}, ["prompt_lang"]) == "en"
 
   # 두 번 돈다. 프리셋 텍스트(style.clean_rules 등) 안에 또 자리표시자가 들어 있을 수 있는데,
   # 맵 순회 순서는 보장되지 않아 한 번만 돌면 안쪽 것이 치환 안 된 채 남을 수 있다.
@@ -197,14 +208,45 @@ defmodule VideoTool.Prompt do
   defp format_colors(map),
     do: Enum.map_join(map, ", ", fn {k, v} -> "#{k}=#{v}" end)
 
-  defp orientation("9:16"), do: "세로형. 인물과 핵심 대상을 화면 가운데 세로축에 두고, 좌우는 비운다"
-  defp orientation("16:9"), do: "가로형. 좌우로 넓게 쓰고, 여백은 한쪽에 몰아 둔다"
-  defp orientation(_), do: "가로형"
+  defp orientation(aspect, true), do: aspect_words(aspect)
+  defp orientation("9:16", _), do: "세로형. 인물과 핵심 대상을 화면 가운데 세로축에 두고, 좌우는 비운다"
+  defp orientation("16:9", _), do: "가로형. 좌우로 넓게 쓰고, 여백은 한쪽에 몰아 둔다"
+  defp orientation(_, _), do: "가로형"
 
   # ── {{scenes}} 렌더링 — 단계마다 형태가 다르다 ──────────────────
 
   # 화면비를 장면마다 붙인다. 맨 위에 한 번만 적으면 에이전트가 흘린다.
   # 같은 말을 반복하는 건 낭비가 아니라, 한 번 흘려도 다음에서 잡히게 하는 장치다.
+  # 영어판 INFO·VIDEO. CLEAN 은 원래부터 영어라 따로 없다.
+  # VIDEO 에서 "대본 구간" 은 뺀다 — 나레이션은 한국어라 그대로 넣으면 영어 프롬프트에
+  # 한국어가 섞인다. 화면에 필요한 건 shot_prompt 와 카메라 계획에 이미 다 있다.
+  defp render_scenes("info", scenes, _segments, _aspect, true) do
+    Enum.map_join(scenes, "\n", fn s ->
+      "Image #{s.scene_no} (summary): #{s.info_instruction}"
+    end)
+  end
+
+  defp render_scenes("video", scenes, _segments, _aspect, true) do
+    Enum.map_join(scenes, "\n\n", fn s ->
+      plan = s.camera_plan || %{}
+
+      """
+      --- SCENE #{pad(s.scene_no)} (#{fmt(s.target_sec)}s, #{s.purpose}) ---
+      Camera: early #{Map.get(plan, "early", "-")} / mid #{Map.get(plan, "mid", "-")} / late #{Map.get(plan, "late", "-")}
+      Cutaway: #{Map.get(plan, "cutaway", "none")}
+      Fast zoom: #{if s.use_fast_zoom, do: "yes", else: "no"}
+      Graphic build order: #{labels_en(s)}
+      Shot: #{s.shot_prompt}
+      """
+      |> String.trim()
+    end)
+  end
+
+  defp render_scenes(stage, scenes, segments, aspect, _en), do: render_scenes(stage, scenes, segments, aspect)
+
+  defp labels_en(%{expected_labels: []}), do: "(none)"
+  defp labels_en(%{expected_labels: labels}), do: Enum.join(labels, " -> ")
+
   defp render_scenes("clean", scenes, _segments, aspect) do
     Enum.map_join(scenes, "
 
@@ -264,9 +306,21 @@ defmodule VideoTool.Prompt do
 
   # ── {{allowed_facts}} — INFO 단계에서만 주입한다 ────────────────
 
-  defp render_allowed_facts(stage, script) when stage != "info" or is_nil(script), do: ""
+  defp render_allowed_facts(stage, script, _en) when stage != "info" or is_nil(script), do: ""
 
-  defp render_allowed_facts(_stage, script) do
+  defp render_allowed_facts(_stage, script, true) do
+    {numbers, names} = script.id |> Projects.allowed_facts() |> Enum.split_with(&(&1.kind == "number"))
+
+    """
+    Only these numbers and names may appear. Nothing outside this list.
+    Allowed numbers: #{join_values(numbers, "(none)")}
+    Allowed names: #{join_values(names, "(none)")}
+    Never invent any other number, date, place or person.
+    """
+    |> String.trim()
+  end
+
+  defp render_allowed_facts(_stage, script, _en) do
     facts = Projects.allowed_facts(script.id)
     {numbers, names} = Enum.split_with(facts, &(&1.kind == "number"))
 
@@ -279,6 +333,7 @@ defmodule VideoTool.Prompt do
     |> String.trim()
   end
 
-  defp join_values([]), do: "(없음)"
-  defp join_values(facts), do: Enum.map_join(facts, ", ", & &1.value)
+  defp join_values(facts, empty \\ "(없음)")
+  defp join_values([], empty), do: empty
+  defp join_values(facts, _empty), do: Enum.map_join(facts, ", ", & &1.value)
 end

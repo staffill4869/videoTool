@@ -203,6 +203,22 @@ defmodule VideoTool.Presets do
     end)
   end
 
+  @doc """
+  이 목소리를 어느 언어에 쓸 것인가. `ko` · `en` · `both`.
+
+  힉스필드 목소리는 **전부 영어권 화자**다. 한국어는 다국어 모드로 억지로 읽히는 것이라
+  목소리마다 결과가 크게 다르다 — 어떤 건 쓸 만하고 어떤 건 외국인이 배운 발음으로 들린다.
+  기계가 판정할 방법이 없으니 사람이 들어 보고 여기에 표시한다.
+  영어판은 다 원어민이므로 따로 가릴 이유가 없다.
+  """
+  @voice_langs ~w(ko en both)
+  def voice_langs, do: @voice_langs
+
+  def set_voice_lang(%Voice{} = voice, lang) when lang in @voice_langs do
+    {1, _} = Repo.update_all(from(v in Voice, where: v.id == ^voice.id), set: [lang: lang])
+    :ok
+  end
+
   defp fetch_by_slug(schema, slug, label) do
     case Repo.get_by(schema, slug: slug) do
       nil -> {:error, "#{label} 프리셋 '#{slug}' 을(를) 찾을 수 없습니다"}

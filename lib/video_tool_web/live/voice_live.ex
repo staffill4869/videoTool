@@ -17,13 +17,15 @@ defmodule VideoToolWeb.VoiceLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(q: "", gender: "all", page_title: "목소리")
+     |> assign(q: "", gender: "all", lang: "all", page_title: "목소리")
      |> load()}
   end
 
   defp load(socket) do
     voices = Presets.list_voices()
-    assign(socket, all: voices, shown: filter(voices, socket.assigns[:q], socket.assigns[:gender]))
+    a = socket.assigns
+
+    assign(socket, all: voices, shown: filter(voices, a[:q], a[:gender], a[:lang]))
   end
 
   # 성별은 display_name 끝에 "— 남성 / — 여성" 으로 들어 있다. 따로 칼럼을 두지 않았다.
@@ -37,12 +39,22 @@ defmodule VideoToolWeb.VoiceLive do
 
   defp short_name(%{display_name: name}), do: name |> String.split("—") |> List.first() |> String.trim()
 
-  defp filter(voices, q, gender) do
+  # "both" 는 양쪽 목록에 다 뜬다. 한국어도 영어도 쓸 만한 목소리라는 뜻이다.
+  defp lang_ok?(_v, nil), do: true
+  defp lang_ok?(_v, "all"), do: true
+  defp lang_ok?(v, want), do: v.lang in [want, "both"]
+
+  defp lang_label("ko"), do: "한국어"
+  defp lang_label("en"), do: "영어"
+  defp lang_label(_), do: "둘 다"
+
+  defp filter(voices, q, gender, lang) do
     q = String.downcase(q || "")
 
     voices
     |> Enum.filter(fn v ->
       (gender in [nil, "all"] or gender_of(v) == gender) and
+        lang_ok?(v, lang) and
         (q == "" or String.contains?(String.downcase(v.display_name), q) or
            String.contains?(String.downcase(v.slug), q))
     end)
@@ -50,13 +62,25 @@ defmodule VideoToolWeb.VoiceLive do
 
   @impl true
   def handle_event("filter", params, socket) do
-    q = params["q"] || socket.assigns.q
-    gender = params["gender"] || socket.assigns.gender
+    a = socket.assigns
+    q = params["q"] || a.q
+    gender = params["gender"] || a.gender
+    lang = params["lang"] || a.lang
 
     {:noreply,
      socket
-     |> assign(q: q, gender: gender)
-     |> then(&assign(&1, shown: filter(&1.assigns.all, q, gender)))}
+     |> assign(q: q, gender: gender, lang: lang)
+     |> then(&assign(&1, shown: filter(&1.assigns.all, q, gender, lang)))}
+  end
+
+  def handle_event("set_lang", %{"slug" => slug, "lang" => lang}, socket) do
+    {:ok, voice} = Presets.fetch_voice(slug)
+    :ok = Presets.set_voice_lang(voice, lang)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "#{short_name(voice)} → #{lang_label(lang)}")
+     |> load()}
   end
 
   def handle_event("set_default", %{"slug" => slug}, socket) do
@@ -103,8 +127,22 @@ defmodule VideoToolWeb.VoiceLive do
               </span>
             </label>
           </div>
+          <%!-- 힉스필드 목소리는 전부 영어권 화자다. 한국어는 다국어 모드로 읽히는 것이라
+                목소리마다 결과가 달라서, 들어 보고 표시한 것만 한국어 목록에 남긴다. --%>
+          <div class="join">
+            <label :for={{key, label} <- [{"all", "전체"}, {"ko", "한국어"}, {"en", "영어"}]} class="join-item">
+              <input type="radio" name="lang" value={key} checked={@lang == key} class="hidden peer" />
+              <span class={["btn btn-sm", @lang == key && "btn-active"]}>{label}</span>
+            </label>
+          </div>
           <span class="text-sm text-base-content/60">{length(@shown)} / {length(@all)}개</span>
         </form>
+
+        <div class="rounded border border-base-300 bg-base-200 p-2 text-xs text-base-content/70">
+          힉스필드 목소리는 <strong>전부 영어권 화자</strong>다. 영어는 원어민이지만 한국어는
+          다국어 모드로 읽히는 것이라 목소리마다 차이가 크다 — 들어 보고 쓸 만한 것만
+          카드의 <strong>한국어</strong> 를 눌러 표시해 두면 다음에 고를 때 그 목록만 보면 된다.
+        </div>
 
         <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <div
@@ -124,6 +162,18 @@ defmodule VideoToolWeb.VoiceLive do
               <span :if={v.sample_count > 0} class="ml-auto text-xs text-base-content/50">
                 실측 {Float.round(v.chars_per_sec, 1)}자/초
               </span>
+            </div>
+
+            <div class="mt-1 join">
+              <button
+                :for={key <- Presets.voice_langs()}
+                phx-click="set_lang"
+                phx-value-slug={v.slug}
+                phx-value-lang={key}
+                class={["join-item btn btn-xs", v.lang == key && "btn-primary"]}
+              >
+                {lang_label(key)}
+              </button>
             </div>
 
             <%!-- 배타 재생: 하나를 틀면 나머지는 멈춘다. 안 그러면 목소리를 비교하려고

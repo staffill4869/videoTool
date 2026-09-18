@@ -85,7 +85,41 @@ defmodule VideoTool.Flow do
     end
   end
 
+  # 프롬프트 언어 실험(VideoTool.Prompt.en?/1)이면 상시 지시도 영어로 간다.
+  # 여기만 한국어로 두면 모든 생성에 한국어 규칙이 걸려 실험이 안 된다.
   defp guideline_for(project) do
+    if VideoTool.Prompt.en?(project), do: guideline_en(project), else: guideline_ko(project)
+  end
+
+  defp guideline_en(project) do
+    aspect = project.aspect || "16:9"
+
+    orientation =
+      if aspect == "9:16",
+        do: "Vertical portrait only, taller than wide. Keep the subject on the central vertical axis.",
+        else: "Horizontal landscape only, wider than tall."
+
+    base = """
+    Every image and video MUST be #{aspect}. #{orientation}
+    Keep the bottom 20 percent free of text — subtitles go there later.
+    But fill the picture all the way to every edge. Never leave an empty band or blank bar at the bottom.
+    Make exactly the number of scenes requested. Never add or drop scenes.
+    If some fail, regenerate only the failed ones until the count is met.
+    Do only what is asked, then stop. Do not suggest or start the next step —
+    make images when asked for images, and videos only when asked for videos.
+
+    Sound: only sound effects that would really occur in the scene.
+    No speech, dialogue, narration or human voice — narration is added separately.
+    No background music, no instruments. Music is added later.
+    """
+
+    case get_in(project.variables || %{}, ["standing_en"]) do
+      s when is_binary(s) and s != "" -> base <> "\n" <> s
+      _ -> base
+    end
+  end
+
+  defp guideline_ko(project) do
     aspect = project.aspect || "16:9"
 
     orientation =

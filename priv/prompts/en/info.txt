@@ -1,0 +1,56 @@
+This step ends at editing images. When every edit is done, STOP.
+Do not turn them into video, clips or animation. Do not suggest a next step.
+
+Edit EVERY provided source image, each one separately.
+Treat each source image as its own independent edit, and produce exactly ONE enhanced image per source.
+{{scene_count}} source images → exactly {{scene_count}} results, in the same order, one-to-one.
+Do not edit only the first or the latest image. Never merge sources into one image, collage, grid, split screen or composite.
+Never skip, combine, reorder, replace or reuse a source.
+Each result is based on its own source only — never borrow characters, objects or backgrounds from another source.
+
+PURPOSE
+Do not redesign or regenerate the scene. Keep each source's subject, composition, camera angle,
+perspective, layout, lighting, colors and identity as close as possible, and ADD ONLY infographic
+elements that make the idea faster to understand.
+Do not zoom, crop or change the camera angle. Do not reinterpret the subject or swap in a new scene.
+
+VISUAL RULES
+Infographic effects must never be small or subtle. Every key graphic must be big, sharp and vivid enough to register instantly on a phone.
+Arrows, rings, outlines, highlight zones, path lines, callout lines and measurement lines are thick and large — take up real screen area when needed.
+Combine several high-saturation accent colors (electric yellow, cyan, magenta, lime). Different information gets different colors. Always strong contrast against the background.
+Use at least two or three clear accent colors per image. Do not repeat the same color set on every image.
+Every big graphic must connect to what is actually being explained. No meaningless decoration.
+
+INTEGRATION WITH THE SCENE
+Graphics must not look like flat stickers on top. Respect the camera angle, perspective and depth — place graphics as if they exist in the 3D space.
+Put graphics in front of, behind, above, below or around the subject; let some follow the subject's surface or motion path.
+Callouts and arrows point at exactly the right target. Never cover the key structure or the character's face.
+
+NO TEXT — ABSOLUTELY NONE
+Put ZERO readable characters in the image: no titles, labels, badges, tags, signs, captions, notes, legends,
+numbers, units, tick numbers, logos, watermarks or handwriting.
+Explain with PICTURES, not words: arrows, rings, outlines, highlight zones, path lines, callouts, cutaway lines,
+color contrast, glow, magnifiers, dotted lines, check marks, prohibition signs, ticks without numbers.
+Show comparisons with color, thickness and direction — "more/less" by size and count, "fast/slow" by arrow length and weight,
+"blocked/open" by walls and gaps.
+No text-like patterns, blurry letter shapes or fake writing either. None at all.
+
+Fill the picture to every edge. Never leave the bottom empty or add a blank band, margin bar or flat gradient panel.
+The bottom 20 percent will carry subtitles — keep key shapes out of that band, but the scene continues underneath it.
+
+ACCURACY
+Do not invent numbers, names, places, mechanisms or causes that cannot be confirmed from the image and context. Omit anything uncertain.
+
+{{allowed_facts}}
+
+FINAL LOOK
+Modern, cinematic, energetic and polished. Strong contrast, brightness, glow, depth, layers and clear visual hierarchy.
+Each result is striking, but every graphic exists to explain its own source image faster.
+
+BATCH RULES
+Process every source to the end. One separate result per source. Same order in and out.
+{{scene_count}} sources → exactly {{scene_count}} results. Do not stop after the first.
+Every result keeps the source's exact aspect ratio. Never change it to 16:9, 9:16, 1:1 or anything else.
+
+── PER-SCENE INSTRUCTIONS ──
+{{scenes}}
