@@ -324,18 +324,39 @@ defmodule VideoTool.Flow do
         :ok
 
       {saved, {:ok, st}} ->
-        if flow_id(saved) == flow_id(st[:url]) do
-          :ok
-        else
-          {:error,
-           "지금 열려 있는 Flow 프로젝트가 이 편의 것이 아닙니다. " <>
-             "다른 편의 결과를 긁어올 수 있어 중단했습니다 — " <>
-             "flow_new_project(#{project.id}) 로 이 편의 창을 연 뒤 다시 회수하세요."}
+        cond do
+          flow_id(saved) == flow_id(st[:url]) ->
+            :ok
+
+          # Flow 가 작업 중에 **제 프로젝트를 새로 갈라** 결과를 거기에 만들어 놓는 일이 있다
+          # (69번 INFO: 효과본 8장이 새 프로젝트에 들어갔고 회수가 막혀 그대로 버려졌다).
+          # 다른 편이 쓰는 주소가 아니면 남의 것이 아니다 — 받아오고 이 편 주소로 갈아 둔다.
+          not other_project_url?(project, st[:url]) ->
+            Logger.warning("Flow 가 새 프로젝트로 갈라졌습니다. 이 편 주소로 바꿉니다: #{st[:url]}")
+            remember_url(project, st[:url])
+            :ok
+
+          true ->
+            {:error,
+             "지금 열려 있는 Flow 프로젝트가 다른 편의 것입니다. " <>
+               "그 편의 결과를 긁어올 수 있어 중단했습니다 — " <>
+               "flow_new_project(#{project.id}) 로 이 편의 창을 연 뒤 다시 회수하세요."}
         end
 
       _ ->
         :ok
     end
+  end
+
+  @doc false
+  # 이 주소를 **다른 편**이 자기 Flow 프로젝트로 적어 뒀는가. (검사에서 부른다)
+  def other_project_url?(project, url) do
+    id = flow_id(url)
+
+    is_binary(url) and url =~ "/project/" and
+      Enum.any?(VideoTool.Projects.list_projects(), fn p ->
+        p.id != project.id and flow_id(get_in(p.variables || %{}, ["flow_url"]) || "") == id
+      end)
   end
 
   defp flow_id(url) when is_binary(url) do

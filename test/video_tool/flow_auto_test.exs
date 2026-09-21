@@ -49,10 +49,13 @@ defmodule VideoTool.FlowAutoTest do
     reloaded
   end
 
-  test "기본값은 수동이다 — 켜지 않으면 브라우저를 건드리지 않는다", %{project: project} do
-    assert project.pipeline == "ai"
+  # 생성 경로는 flow_auto 하나로 정리했다(8175e42). 손으로 붙여넣는 "ai" 는 남겨는 뒀지만
+  # 기본이 아니다 — 이 검사는 그때 같이 안 고쳐져 오래 깨져 있었다.
+  test "기본은 flow_auto 다. 손으로 붙여넣는 편은 브라우저를 건드리지 않는다", %{project: project} do
+    assert project.pipeline == "flow_auto"
 
-    result = Pipeline.next(project)
+    {:ok, manual} = Projects.set_pipeline(project, "ai")
+    result = Pipeline.next(manual)
 
     assert result.action == "clipboard"
     refute Map.has_key?(result, :flow_auto_unavailable)
@@ -124,5 +127,30 @@ defmodule VideoTool.FlowAutoTest do
   test "pipeline 값은 아는 것만 받는다", %{project: project} do
     assert {:error, changeset} = Projects.set_pipeline(project, "아무거나")
     assert %{pipeline: _} = errors_on(changeset)
+  end
+
+  # 회수는 탭이 이 편의 Flow 프로젝트일 때만 한다. 단 Flow 가 작업 중에 제 프로젝트를
+  # 새로 갈라 놓는 일이 있어서(69번 INFO), **다른 편이 쓰는 주소가 아니면** 받아온다.
+  # 이 판단이 느슨해지면 남의 편 그림이 우리 자산으로 들어온다 — 실제로 16장이 섞였다.
+  test "다른 편이 쓰는 Flow 주소만 남의 것으로 본다", %{project: project} do
+    {:ok, other} =
+      Projects.create_project(%{
+        "title" => "다른 편",
+        "target_sec" => 30,
+        "style_slug" => "iso-lowpoly",
+        "domain_slug" => "history-military",
+        "voice_slug" => "mark",
+        "variables" => %{"flow_url" => "https://flow.google.com/project/aaaa-1111"}
+      })
+
+    # 다른 편이 적어 둔 주소 → 남의 것
+    assert VideoTool.Flow.other_project_url?(project, "https://flow.google.com/project/aaaa-1111")
+
+    # 아무도 안 쓰는 주소(= Flow 가 우리 작업 중에 갈라낸 새 프로젝트) → 남의 것이 아니다
+    refute VideoTool.Flow.other_project_url?(project, "https://flow.google.com/project/bbbb-2222")
+
+    # 자기 자신이 적어 둔 주소도 남의 것이 아니다
+    {:ok, other} = Projects.update_project(other, %{"variables" => %{"flow_url" => ""}})
+    refute VideoTool.Flow.other_project_url?(other, "https://flow.google.com/project/aaaa-1111")
   end
 end
