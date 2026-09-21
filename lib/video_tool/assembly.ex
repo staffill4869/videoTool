@@ -371,8 +371,10 @@ defmodule VideoTool.Assembly do
          {:ok, clips} <- fetch_clips(project),
          {:ok, plan} <- build_plan(clips, narration),
          opts = Keyword.put_new(opts, :fit, fit_mode(narration)),
-         {:ok, pieces} <- retime_all(plan, dir, opts),
-         {:ok, master} <- concat_and_mix(pieces, narration, dir),
+         overlaps = seam_overlaps(project, plan, opts),
+         {:ok, pieces} <- retime_all(plan, dir, opts, overlaps),
+         {:ok, joined} <- dissolve(pieces, overlaps, dir, opts),
+         {:ok, master} <- concat_and_mix(joined, narration, dir),
          {:ok, final} <- burn_subtitles(master, narration, dir, opts) do
       {:ok, probe} = Ffmpeg.probe(final)
 
@@ -494,25 +496,139 @@ defmodule VideoTool.Assembly do
   # 기본은 **클립을 그대로 쓴다**. 목표 길이에 맞춰 자르면 8초짜리를 3초로 깎아
   # 만든 영상의 60%를 버리게 된다 — 그럴 거면 만들 이유가 없다.
   # 길이는 결과지 목표가 아니다. 맞추고 싶을 때만 fit: :scenes 를 준다.
-  defp retime_all(plan, dir, opts) do
+  defp retime_all(plan, dir, opts, overlaps) do
     if Keyword.get(opts, :fit, :clips) == :clips do
       {:ok, Enum.map(plan, & &1.clip.file_path)}
     else
-      retime_to_scenes(plan, dir, Keyword.get(opts, :aspect, "16:9"))
+      retime_to_scenes(plan, dir, Keyword.get(opts, :aspect, "16:9"), overlaps)
     end
   end
 
-  defp retime_to_scenes(plan, dir, aspect) do
+  # 디졸브는 앞 조각을 **그만큼 더 길게** 뽑아 그 몫을 겹쳐 쓴다.
+  # 안 그러면 겹친 만큼 영상이 짧아져 나레이션이 뒤로 밀린다.
+  defp retime_to_scenes(plan, dir, aspect, overlaps) do
     plan
     |> Enum.with_index(1)
     |> Enum.reduce_while({:ok, []}, fn {step, i}, {:ok, acc} ->
       out = Path.join([dir, "work", "clip_#{String.pad_leading("#{i}", 2, "0")}.mp4"])
+      target = step.target + Enum.at(overlaps, i - 1, 0.0)
 
-      case retime(step.clip.file_path, step.target, out, aspect) do
+      case retime(step.clip.file_path, target, out, aspect) do
         {:ok, path} -> {:cont, {:ok, acc ++ [path]}}
         {:error, r} -> {:halt, {:error, "#{i}번 클립 리타이밍 실패: #{r}"}}
       end
     end)
+  end
+
+  # ── 장면 이음매 ───────────────────────────────────────────────
+  #
+  # 장면이 바뀔 때 툭 끊기는 건 클립 탓이 아니라 **이음매 탓**이다.
+  # 다만 모든 이음매가 같지는 않다: 앞 장면의 끝 그림과 다음 장면의 시작 그림이
+  # 같은 파일이면(71번의 사슬 구조) 이미 한 호흡으로 이어져 있어 손대면 안 된다.
+  # 장소가 바뀌는 이음매에만 0.3초를 겹친다.
+  @dissolve_sec 0.3
+  # 겹치는 체인을 한 줄로 만들려면 모든 이음매에 겹침이 있어야 한다.
+  # 이어진 이음매에는 한 프레임 남짓만 준다 — 같은 그림이라 눈에 안 보인다.
+  @seam_sec 0.08
+
+  defp seam_overlaps(project, plan, opts) do
+    if Keyword.get(opts, :fit, :clips) == :clips or Keyword.get(opts, :dissolve, true) == false do
+      List.duplicate(0.0, length(plan))
+    else
+      ends = frame_files(project, "info")
+      starts = frame_files(project, "clean")
+
+      plan
+      |> Enum.chunk_every(2, 1, [nil])
+      |> Enum.map(fn
+        [_step, nil] ->
+          0.0
+
+        [step, next] ->
+          want =
+            if joined_frame?(ends, starts, step, next), do: @seam_sec, else: @dissolve_sec
+
+          # 앞 조각에 남은 재료 안에서만 겹친다. 없으면 그 이음매는 그냥 컷이다.
+          spare = max((step.clip.duration_sec || 0.0) - step.target, 0.0)
+          if spare < 0.04, do: 0.0, else: Float.round(min(want, spare), 2)
+      end)
+    end
+  end
+
+  defp frame_files(project, kind) do
+    project.id
+    |> Media.list_assets(kind)
+    |> Enum.filter(&(&1.scene_id && &1.status != "rejected"))
+    |> Map.new(&{&1.scene_id, &1.file_path})
+  end
+
+  defp joined_frame?(ends, starts, step, next) do
+    a = Map.get(ends, step.clip.scene_id)
+    b = Map.get(starts, next.clip.scene_id)
+    is_binary(a) and a == b
+  end
+
+  # 조각들을 하나로 잇는다. 이음매마다 그만큼 겹쳐 디졸브한다.
+  # 겹치는 몫은 retime 이 앞 조각에 미리 더해 뒀으므로 전체 길이는 그대로다.
+  defp dissolve(pieces, overlaps, dir, opts) do
+    cond do
+      length(pieces) < 2 -> {:ok, pieces}
+      Enum.all?(overlaps, &(&1 <= 0.0)) -> {:ok, pieces}
+      true -> stitch(pieces, overlaps, dir, Keyword.get(opts, :aspect, "16:9"))
+    end
+  end
+
+  @doc """
+  이음매마다 `{조각 번호, 겹칠 시간, xfade offset}` 을 낸다.
+
+  offset 은 **지금까지 이어 붙인 길이에서 겹칠 만큼 앞당긴 지점**이다.
+  여기를 틀리면 영상이 짧아지고 나레이션이 뒤로 밀린다 — 그래서 따로 떼어 둔다.
+  겹침이 0 이면 xfade 가 거부하므로 한 프레임(0.04초)을 최소로 쓴다.
+  """
+  def seam_plan(durs, overlaps) do
+    durs
+    |> Enum.with_index()
+    |> Enum.drop(1)
+    |> Enum.map_reduce(Enum.at(durs, 0, 0.0), fn {d, i}, acc ->
+      ov = max(Enum.at(overlaps, i - 1, 0.0), 0.04)
+      {{i, ov, max(acc - ov, 0.0)}, acc + d - ov}
+    end)
+    |> elem(0)
+  end
+
+  defp stitch(pieces, overlaps, dir, aspect) do
+    out = Path.join([dir, "work", "stitched.mp4"])
+    audio? = Enum.all?(pieces, &has_audio?/1)
+    durs = Enum.map(pieces, &(probe_sec(&1) || 0.0))
+
+    {filters, vlabel, alabel} =
+      durs
+      |> seam_plan(overlaps)
+      |> Enum.reduce({[], "0:v", "0:a"}, fn {i, ov, offset}, {acc_f, v, a} ->
+        nv = "v#{i}"
+        na = "a#{i}"
+
+        f =
+          ["[#{v}][#{i}:v]xfade=transition=fade:duration=#{f(ov)}:offset=#{f(offset)}[#{nv}]"] ++
+            if audio?, do: ["[#{a}][#{i}:a]acrossfade=d=#{f(ov)}[#{na}]"], else: []
+
+        {acc_f ++ f, nv, if(audio?, do: na, else: a)}
+      end)
+
+    {w, h} = if aspect == "9:16", do: {1080, 1920}, else: {1920, 1080}
+
+    args =
+      ["-v", "error", "-y"] ++
+        Enum.flat_map(pieces, &["-i", &1]) ++
+        ["-filter_complex", Enum.join(filters, ";"), "-map", "[#{vlabel}]"] ++
+        (if audio?, do: ["-map", "[#{alabel}]", "-c:a", "aac", "-b:a", "192k"], else: ["-an"]) ++
+        ["-s", "#{w}x#{h}", "-r", "30", "-c:v", "libx264", "-preset", "medium",
+         "-crf", "23", "-pix_fmt", "yuv420p", out]
+
+    case done(args, out) do
+      {:ok, path} -> {:ok, [path]}
+      {:error, r} -> {:error, "이음매 디졸브 실패: #{r}"}
+    end
   end
 
   @doc """
