@@ -23,7 +23,8 @@ defmodule VideoToolWeb.Router do
 
     # 이 앱의 조작은 전부 MCP 로 한다. 한 번도 안 붙었으면 /connect 로 보낸다.
     live_session :gated, on_mount: {VideoToolWeb.RequireMCP, :default} do
-      live "/", ProjectLive.Index, :index
+      # 홈은 현황판이다. 프로젝트 표가 홈이던 시절엔 "지금 뭐가 돌고 있나" 를 볼 자리가 없었다.
+      live "/", OverviewLive, :index
       live "/projects", ProjectLive.Index, :index
       live "/projects/:id", ProjectLive.Show, :show
       live "/dashboard", DashboardLive, :index
