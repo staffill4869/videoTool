@@ -9,7 +9,9 @@
 #
 # 기본은 **화면 밖**에 띄운다(모니터 왼쪽 바깥 좌표). 최소화하면 안 된다 — 최소화된 창은
 # Chrome 이 그리기를 멈춰서 호버·스크린샷이 먹통이 된다(스크린샷 30초 타임아웃 실측).
-# 로그인이 풀려 사람이 봐야 할 때는 Chrome 을 닫고 `.\launch-chrome.ps1 -Show` 로 다시 띄운다.
+# 화면에서 보고 싶을 때는 **닫지 말고** `.\show-chrome.ps1` 로 창을 화면 안으로 끌어온다
+# (생성 중에도 안전하다). 숨길 때는 `.\show-chrome.ps1 -Hide`.
+# 처음부터 보이게 띄우려면 `.\launch-chrome.ps1 -Show`.
 
 param([switch]$Show)
 
@@ -63,7 +65,7 @@ try {
 }
 
 Write-Host "Chrome 을 띄웠습니다 (포트 $port, 프로필 $profile)"
-if (-not $Show) { Write-Host "화면 밖에 띄웠습니다. 보려면 Chrome 을 닫고 -Show 로 다시 실행하세요." }
+if (-not $Show) { Write-Host "화면 밖에 띄웠습니다. 보려면 .\show-chrome.ps1 (닫을 필요 없습니다)." }
 Write-Host ""
 Write-Host "처음이라면 이 창에서 직접 구글 로그인을 하세요. 자동화는 로그인을 대신하지 않습니다."
 Write-Host "다운로드가 '저장 위치 묻기' 로 설정돼 있으면 꺼주세요 — 자동 수집이 안 됩니다."
