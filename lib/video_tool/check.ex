@@ -113,7 +113,9 @@ defmodule VideoTool.Check do
   # ── 클립이 장면 수만큼 있나 ─────────────────────────────────────
   defp clip_coverage(project) do
     scenes = length(Projects.scenes(project.id))
-    clips = Media.list_assets(project.id, "clip") |> Enum.count(& &1.scene_id)
+    clips =
+      Media.list_assets(project.id, "clip")
+      |> Enum.count(&(&1.scene_id && &1.status != "rejected"))
 
     cond do
       scenes == 0 -> fail("클립", "장면이 없습니다")

@@ -422,11 +422,13 @@ defmodule VideoTool.Assembly do
     end
   end
 
+  # 반려한 클립은 후보에서 뺀다. 안 빼면 다시 만든 편에서 **옛 클립이 신뢰도로 이긴다** —
+  # 71번은 8개를 새로 만들었는데 3·4·7·8 장면이 구 클립으로 합성됐다 (점검의 "16/8 장면"이 그 신호).
   defp fetch_clips(project) do
     clips =
       project.id
       |> Media.list_assets("clip")
-      |> Enum.filter(&(&1.scene_id && File.exists?(&1.file_path)))
+      |> Enum.filter(&(&1.scene_id && &1.status != "rejected" && File.exists?(&1.file_path)))
 
     if clips == [] do
       {:error, "쓸 수 있는 클립이 없습니다. Flow 결과를 ingest 하세요."}
