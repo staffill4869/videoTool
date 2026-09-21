@@ -313,13 +313,18 @@ defmodule VideoTool.Prompt do
   defp labels_en(%{expected_labels: []}), do: "(none)"
   defp labels_en(%{expected_labels: labels}), do: Enum.join(labels, " -> ")
 
-  defp render_scenes("clean", scenes, _segments, aspect) do
+  # 장면의 나레이션도 같이 보낸다. 화면 설명만 보내던 때는 대사와 그림이 어긋나도 아무도 못 잡았다 —
+  # 69번은 대사 없는 컷을 하나 그려 넣는 바람에 2~7번 그림이 한 칸씩 밀린 채로 완성됐다.
+  # 그리는 것은 화면 설명이고, 그림이 결국 무엇을 말해야 하는지를 대사가 알려 준다.
+  # 한글 문장이 들어가는 만큼 "글자를 그리지 마라" 를 그 자리에서 한 번 더 못 박는다.
+  defp render_scenes("clean", scenes, segments, aspect) do
     Enum.map_join(scenes, "
 
 ", fn s ->
       """
       === IMAGE #{pad(s.scene_no)} / #{filename(s)} / #{fmt(s.target_sec)}s / #{aspect} ===
       #{s.shot_prompt}
+      #{narration_hint(Map.get(segments, s.id))}
       Apply the GLOBAL STYLE above. No text, numbers, arrows, labels, icons or route lines.
       Aspect ratio: #{aspect}. #{aspect_words(aspect)}
       """
@@ -355,6 +360,21 @@ defmodule VideoTool.Prompt do
 
   defp render_scenes(_stage, scenes, _segments, _aspect) do
     Enum.map_join(scenes, "\n", fn s -> "#{s.scene_no}. #{s.shot_prompt}" end)
+  end
+
+  defp narration_hint(nil), do: ""
+
+  defp narration_hint(text) do
+    case String.trim(to_string(text)) do
+      "" ->
+        ""
+
+      line ->
+        # 따옴표로 감싸면 생성기가 그 글자를 그림에 써 넣으려 든다. 인용부호 없이 준다.
+        "Voice-over heard over this shot (audio only, never shown on screen): #{line}\n" <>
+          "Draw the shot described above so that it shows exactly what that line is about. " <>
+          "Do not write that sentence, its words, or any other text into the picture."
+    end
   end
 
   defp aspect_words("9:16"),

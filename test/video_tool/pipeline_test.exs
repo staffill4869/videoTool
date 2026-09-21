@@ -118,8 +118,24 @@ defmodule VideoTool.PipelineTest do
 
       assert info =~ "70킬로미터"
       assert info =~ "이 목록에 없는 숫자"
-      # CLEAN 에 수치가 새어 들어가면 인포그래픽 없는 이미지에 숫자가 그려진다
-      refute clean =~ "70킬로미터"
+      # 허용 수치 목록 자체는 CLEAN 에 들어가지 않는다 — 글자 없는 그림 단계라 쓸 데가 없다.
+      # (장면 나레이션은 2026-09-21 부터 CLEAN 에도 들어간다. 그건 "소리로만 나간다" 는 단서와
+      #  "글자를 그리지 마라" 가 바로 뒤따른다 — 아래 검사가 그 두 줄을 지킨다.)
+      refute clean =~ "이 목록에 없는 숫자"
+    end
+
+    test "CLEAN 프롬프트는 장면 대사를 주되 글자로 그리지 말라고 못 박는다", %{project: project} do
+      seed_scenes(project)
+      seed_facts(project)
+
+      {:ok, clean} = Prompt.render(project, "clean")
+
+      # 대사가 없으면 그림이 대본과 어긋나도 아무도 못 잡는다 (69번: 2~7번이 한 칸씩 밀렸다)
+      assert clean =~ "독일군이 이 얘기를 들었으면"
+      assert clean =~ "audio only, never shown on screen"
+      assert clean =~ "any other text into the picture"
+      # 인용부호로 감싸면 생성기가 그 글자를 그림에 써 넣으려 든다
+      refute clean =~ "\"독일군이 이 얘기를 들었으면\""
     end
 
     test "scene_no 를 주면 그 장면만 나온다", %{project: project} do
