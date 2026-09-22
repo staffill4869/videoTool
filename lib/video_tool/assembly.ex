@@ -375,7 +375,7 @@ defmodule VideoTool.Assembly do
          {:ok, pieces} <- retime_all(plan, dir, opts, overlaps),
          {:ok, joined} <- dissolve(pieces, overlaps, dir, opts),
          {:ok, master} <- concat_and_mix(joined, narration, dir),
-         {:ok, final} <- burn_subtitles(master, narration, dir, opts) do
+         {:ok, final} <- burn_subtitles(project, master, narration, dir, opts) do
       {:ok, probe} = Ffmpeg.probe(final)
 
       attrs = %{
@@ -833,11 +833,11 @@ defmodule VideoTool.Assembly do
   end
 
   # 자막 하드번. 실패해도 마스터는 남기고 진행한다 — 자막 때문에 완성본을 통째로 잃지 않는다.
-  defp burn_subtitles(master, narration, dir, opts) do
+  defp burn_subtitles(project, master, narration, dir, opts) do
     if Keyword.get(opts, :burn, true) do
       font = Keyword.get(opts, :font) || VideoTool.Presets.default_subtitle_font()
 
-      case write_ass(narration, dir, font, Keyword.get(opts, :aspect, "16:9")) do
+      case write_ass(project, narration, dir, font, Keyword.get(opts, :aspect, "16:9")) do
         {:ok, ass} -> try_burn(master, ass, dir)
         {:error, r} ->
           Logger.warning("자막 파일 생성 실패, 자막 없이 진행: #{r}")
@@ -877,28 +877,57 @@ defmodule VideoTool.Assembly do
     end
   end
 
-  defp write_ass(narration, dir, font, aspect) do
+  defp write_ass(project, narration, dir, font, aspect) do
     rows = Media.subtitles(narration.id)
 
     if rows == [] do
       {:error, "자막 줄이 없습니다"}
     else
-      body = Enum.map_join(rows, "\n", &ass_line/1)
+      body =
+        (Enum.map(rows, &ass_line/1) ++ label_lines(project, narration))
+        |> Enum.join("\n")
+
       path = Path.join(dir, "subs.ass")
       File.write!(path, ass_header(font, aspect) <> body <> "\n")
       {:ok, path}
     end
   end
 
+  # 장면마다 짧은 설명 글자를 **화면 위쪽**에 얹는다 (`scene.expected_labels`).
+  # 자막은 아래(MarginV 260)에 있어 겹치지 않는다.
+  # 그림에 글자를 그려 달라고 하지 않는 이유: 생성기는 한글을 못 쓴다 — 글자 모양만 흉내 낸
+  # 것이 나오고, INFO 프롬프트도 "글자 절대 금지" 로 잡혀 있다. 여기서 구우면 정확하다.
+  defp label_lines(project, narration) do
+    timing = Map.new(narration.scene_timing || [], &{&1["scene_id"], &1})
+
+    project.id
+    |> Projects.scenes()
+    |> Enum.flat_map(fn scene ->
+      with %{"start" => from0, "end" => stop} <- Map.get(timing, scene.id),
+           [_ | _] = labels <- scene.expected_labels do
+        text = labels |> Enum.take(2) |> Enum.join("   ·   ")
+        from = from0 + 0.35
+        to = min(from + 3.2, stop - 0.25)
+
+        # 스치듯 지나가면 읽히지 않는다. 0.8초를 못 채우면 아예 안 넣는다.
+        if to - from >= 0.8,
+          do: ["Dialogue: 1,#{ts(from)},#{ts(to)},Label,,0,0,0,,{\\fad(250,250)}#{escape(text)}"],
+          else: []
+      else
+        _ -> []
+      end
+    end)
+  end
+
   # 자막 판을 화면비에 맞춘다. 1920x1080 으로 고정해 두면 9:16 영상에서 글자가
   # 가로로 눌려 나오고, 한 줄이 화면 밖으로 넘친다 — 세로는 폭이 절반도 안 된다.
   defp ass_header(font, aspect) do
-    {w, h, size, margin_x, margin_v} =
+    {w, h, size, margin_x, margin_v, label_size, label_v} =
       case aspect do
         # 세로는 폭이 1080 뿐이다. 글자를 키우면 두세 글자마다 줄이 바뀐다.
         # 좌우 여백을 넉넉히 두고(각 80) 글자는 52pt — 한 줄에 13~15자가 들어간다.
-        "9:16" -> {1080, 1920, 52, 80, 260}
-        _ -> {1920, 1080, 54, 120, 90}
+        "9:16" -> {1080, 1920, 52, 80, 260, 58, 150}
+        _ -> {1920, 1080, 54, 120, 90, 56, 70}
       end
 
     """
@@ -912,6 +941,7 @@ defmodule VideoTool.Assembly do
     [V4+ Styles]
     Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
     Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,3,1,2,#{margin_x},#{margin_x},#{margin_v},1
+    Style: Label,#{font},#{label_size},&H0066D9FF,&H00101010,&HA0000000,1,1,3,2,8,#{margin_x},#{margin_x},#{label_v},1
 
     [Events]
     Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
