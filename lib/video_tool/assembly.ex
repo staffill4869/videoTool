@@ -853,8 +853,13 @@ defmodule VideoTool.Assembly do
 
     # Windows 는 subtitles 필터에 드라이브 콜론이 들어가면 깨진다.
     # 작업 폴더로 들어가 파일 이름만 준다.
+    # 자막 굽기는 System.cmd 로 직접 부르므로 Ffmpeg.exec 의 스레드 제한을 못 받는다.
+    # 여기서 안 막으면 인코딩이 코어를 전부 먹고 서버가 응답을 멈춘다 (2026-09-21).
+    threads = to_string(max(div(System.schedulers_online(), 2), 2))
+
     args = [
       "-v", "error", "-y",
+      "-threads", threads,
       "-i", master,
       "-vf", "subtitles=#{Path.basename(ass)}",
       "-c:a", "copy",

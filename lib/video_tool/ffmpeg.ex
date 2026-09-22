@@ -128,7 +128,14 @@ defmodule VideoTool.Ffmpeg do
   인자를 그대로 넘겨 ffmpeg 을 돌린다. 인코딩처럼 오래 걸리는 작업용.
   `run/2` 와 달리 호출자가 인자를 전부 만든다.
   """
-  def exec(args), do: run("ffmpeg", args)
+  # 인코딩이 코어를 전부 먹으면 같은 기계의 서버가 응답을 못 한다 — 합성 중에
+  # /api 호출이 20초 넘게 걸려 "서버가 먹통" 으로 보였다 (2026-09-21, 72번).
+  # 코어의 절반만 쓴다. 남는 절반으로 서버가 계속 돈다.
+  def exec(args), do: run("ffmpeg", thread_cap(args))
+
+  defp thread_cap(args) do
+    if "-threads" in args, do: args, else: ["-threads", to_string(max(div(System.schedulers_online(), 2), 2))] ++ args
+  end
 
   # ── 실행 ────────────────────────────────────────────────────────
 
