@@ -18,7 +18,7 @@ defmodule VideoTool.Mapping do
   @ambiguity_epsilon 0.02
 
   @doc "kind 별로 배정한다. 반환값은 %{asset_id => {scene_id, confidence}}."
-  def assign(project, "clean", assets), do: by_order(project, assets)
+  def assign(project, "clean", assets), do: by_order(project, "clean", assets)
   def assign(project, "info", assets), do: by_similarity(project, assets, "clean", :phash)
   def assign(project, "clip", assets), do: by_chain(project, assets)
 
@@ -26,8 +26,8 @@ defmodule VideoTool.Mapping do
 
   # ── CLEAN — 순서 기반 ───────────────────────────────────────────
 
-  defp by_order(project, assets) do
-    scenes = Projects.scenes(project.id)
+  defp by_order(project, kind, assets) do
+    scenes = target_scenes(project, kind)
 
     assets
     |> Enum.sort_by(& &1.source_filename)
@@ -38,12 +38,12 @@ defmodule VideoTool.Mapping do
   # ── INFO — CLEAN 과의 phash 유사도 (+ OCR 라벨 보강) ────────────
 
   defp by_similarity(project, assets, reference_kind, hash_field) do
-    scenes = Projects.scenes(project.id)
+    scenes = target_scenes(project, "info")
     reference = reference_by_scene(project, reference_kind)
 
     if map_size(reference) == 0 do
       # 기준이 될 CLEAN 이 아직 없다 — 순서로 떨어뜨린다
-      by_order(project, assets)
+      by_order(project, "info", assets)
     else
       ocr_texts = maybe_ocr(assets)
 
@@ -92,7 +92,7 @@ defmodule VideoTool.Mapping do
   # ── 클립 — 첫 프레임=CLEAN, 마지막 프레임=INFO 체인 ─────────────
 
   defp by_chain(project, assets) do
-    scenes = Projects.scenes(project.id)
+    scenes = target_scenes(project, "clip")
     cleans = reference_by_scene(project, "clean")
     infos = reference_by_scene(project, "info")
 
@@ -152,6 +152,25 @@ defmodule VideoTool.Mapping do
     case scenes |> Enum.map(&scorer.(&1, asset)) |> Enum.sort(:desc) do
       [best, second | _] when best - second < @ambiguity_epsilon -> min(score, 0.3)
       _ -> score
+    end
+  end
+
+  # 이미 그 종류가 붙어 있는 장면은 후보에서 뺀다.
+  # 안 빼면 3·5·7 번만 새로 뽑아도 결과가 1·2·3 번에 붙는다 — 배정이 파일 순서를 그대로
+  # 1번 장면부터 깔기 때문이다. 71·72 편에서 매번 눈으로 확인하고 SQL 로 되돌렸던 자리다.
+  # 비어 있는 장면이 하나도 없으면 "전부 다시 뽑는다" 로 읽는다 (Mcp.wanted_scenes 와 같은 규칙).
+  defp target_scenes(project, kind) do
+    taken =
+      project.id
+      |> Media.list_assets(kind)
+      |> Enum.filter(&(&1.scene_id && &1.status != "rejected"))
+      |> MapSet.new(& &1.scene_id)
+
+    all = Projects.scenes(project.id)
+
+    case Enum.reject(all, &MapSet.member?(taken, &1.id)) do
+      [] -> all
+      open -> open
     end
   end
 
