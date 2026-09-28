@@ -22,7 +22,10 @@ import "phoenix_html"
 // Establish Phoenix Socket and LiveView configuration.
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
-import {hooks as colocatedHooks} from "phoenix-colocated/video_crm"
+// 앱 이름은 video_tool 이다. 콜로케이트 훅은 _build/<env>/phoenix-colocated/<앱이름> 에
+// 깔리므로 여기도 video_tool 이어야 한다. video_crm 으로 두면 esbuild 가 조용히 실패하고
+// app.js 가 안 만들어져 LiveView 가 안 붙는다 (화면은 CSS 만 입혀져 멀쩡해 보인다).
+import {hooks as colocatedHooks} from "phoenix-colocated/video_tool"
 import topbar from "../vendor/topbar"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

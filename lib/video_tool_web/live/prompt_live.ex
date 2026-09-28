@@ -10,15 +10,19 @@ defmodule VideoToolWeb.PromptLive do
   """
   use VideoToolWeb, :live_view
 
-  alias VideoTool.{Presets, Projects, Prompt}
+  alias VideoTool.{Presets, Projects, Prompt, PromptRewriter}
 
-  @stages ~w(clean info video)
+  # agent 는 그림 프롬프트가 아니라 **무인 루프 지시문**이다. 미리보기(변수 치환)는
+  # 의미가 없지만, 같은 화면에서 고칠 수 있어야 해서 같이 둔다 — 프롬프트를 고치러
+  # 두 군데를 다녀야 하면 결국 한쪽이 낡는다.
+  @stages ~w(clean info video agent)
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(stage: "clean", preview: nil, missing: [], dirty: false)
+     |> assign(instruction: "", rewriting: false, rewrite_error: nil, rewrite_note: nil, undo_body: nil)
      |> load()}
   end
 
@@ -36,6 +40,7 @@ defmodule VideoToolWeb.PromptLive do
       domain: List.first(domains),
       projects: projects,
       project_id: projects |> List.first() |> then(&(&1 && &1.id)),
+      stages: @stages,
       templates: Map.new(@stages, &{&1, active_template(&1)})
     )
     |> assign_body()
@@ -56,6 +61,41 @@ defmodule VideoToolWeb.PromptLive do
   # ── 이벤트 ──────────────────────────────────────────────────────
 
   @impl true
+  # 고치는 동안 화면이 멈추면 안 된다(3분까지 걸린다). 따로 돌리고 결과만 받는다.
+  def handle_event("rewrite", %{"instruction" => instruction}, socket) do
+    if socket.assigns.rewriting do
+      {:noreply, socket}
+    else
+      me = self()
+      body = socket.assigns.body
+      stage = socket.assigns.stage
+
+      Task.start(fn ->
+        send(me, {:rewritten, PromptRewriter.rewrite(body, instruction, stage: stage)})
+      end)
+
+      {:noreply,
+       assign(socket,
+         rewriting: true,
+         instruction: instruction,
+         rewrite_error: nil,
+         rewrite_note: nil
+       )}
+    end
+  end
+
+  def handle_event("undo_rewrite", _, socket) do
+    {:noreply,
+     socket
+     |> assign(
+       body: socket.assigns.undo_body,
+       undo_body: nil,
+       rewrite_note: nil,
+       rewrite_error: nil,
+       dirty: true
+     )}
+  end
+
   def handle_event("stage", %{"stage" => stage}, socket) when stage in @stages do
     {:noreply, socket |> assign(stage: stage, dirty: false, preview: nil) |> assign_body()}
   end
@@ -292,6 +332,32 @@ defmodule VideoToolWeb.PromptLive do
     end
   end
 
+  # AI 가 고쳐 온 결과. 편집칸에 올려만 놓고 저장은 사람이 누른다.
+  @impl true
+  def handle_info({:rewritten, {:ok, new_body}}, socket) do
+    {:noreply,
+     assign(socket,
+       rewriting: false,
+       undo_body: socket.assigns.body,
+       body: new_body,
+       dirty: true,
+       rewrite_note:
+         "고쳤습니다 (#{String.length(socket.assigns.body)}자 → #{String.length(new_body)}자)"
+     )}
+  end
+
+  def handle_info({:rewritten, {:error, reason}}, socket) do
+    {:noreply, assign(socket, rewriting: false, rewrite_error: reason)}
+  end
+
+  # 탭마다 이게 무엇인지 한 줄. agent 는 그림 프롬프트가 아니라서
+  # 안 적어두면 "여기도 화풍 쓰는 곳인가" 로 헷갈린다.
+  defp stage_hint("clean"), do: "배경 이미지 — 글자 없이"
+  defp stage_hint("info"), do: "그 위에 얹는 수치·지시선"
+  defp stage_hint("video"), do: "8초 클립 (첫=CLEAN, 끝=INFO)"
+  defp stage_hint("agent"), do: "무인 루프의 작업 절차 — 그림 프롬프트가 아니다"
+  defp stage_hint(_), do: ""
+
   # ── 화면 ────────────────────────────────────────────────────────
 
   @impl true
@@ -310,8 +376,10 @@ defmodule VideoToolWeb.PromptLive do
       </.header>
 
       <div role="tablist" class="tabs tabs-bordered mt-4">
+        <%!-- 목록을 여기 또 적지 않는다. @stages 하나만 고치면 탭이 따라오게 한다 —
+              두 군데 있으면 단계를 늘렸을 때 한쪽이 낡아 탭이 안 뜬다(실측 2026-09-23). --%>
         <button
-          :for={s <- ~w(clean info video)}
+          :for={s <- @stages}
           role="tab"
           phx-click="stage"
           phx-value-stage={s}
@@ -322,37 +390,96 @@ defmodule VideoToolWeb.PromptLive do
         </button>
       </div>
 
-      <div class="mt-4 grid gap-6 lg:grid-cols-2">
-        <div>
-          <div class="mb-2 flex items-center justify-between">
-            <h2 class="font-semibold">본문</h2>
-            <div class="flex items-center gap-2">
-              <span :if={@dirty} class="text-xs text-warning">저장 안 됨</span>
-              <span class="text-xs opacity-60">{String.length(@body)}자</span>
-              <.button phx-click="save_body" disabled={not @dirty} class="btn-primary btn-xs">
-                새 버전으로 저장
-              </.button>
-            </div>
-          </div>
-
-          <form phx-change="edit_body">
-            <textarea
-              name="body"
-              rows="26"
-              class="textarea textarea-bordered w-full font-mono text-xs leading-relaxed"
-              phx-debounce="400"
-            >{@body}</textarea>
-          </form>
-
-          <div class="mt-2 text-xs opacity-60">
-            쓸 수 있는 슬롯: project.aspect · project.target_sec · project.target_chars ·
-            scene_count · script · scenes · allowed_facts ·
-            style.clean_rules · style.camera_rules · style.global_style · style.asset_definitions ·
-            domain.info_rules · domain.element_list · domain.color_semantics · domain.video_topic_rules
+      <%!-- 본문은 **화면 전체 폭**을 쓴다. 2단으로 쪼개면 프롬프트 한 줄이 반토막 나서
+            어디서 문장이 끊기는지 안 보인다 — 정작 제일 자주 읽고 고치는 곳이다.
+            그림체·장르·미리보기는 아래로 내리고 접어 둔다. --%>
+      <div class="mt-4">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h2 class="font-semibold">
+            본문
+            <span class="ml-1 text-xs font-normal opacity-60">{stage_hint(@stage)}</span>
+          </h2>
+          <div class="flex items-center gap-2">
+            <span :if={@dirty} class="text-xs text-warning">저장 안 됨</span>
+            <span class="text-xs opacity-60">{String.length(@body)}자</span>
+            <.button phx-click="save_body" disabled={not @dirty} class="btn-primary btn-sm">
+              새 버전으로 저장
+            </.button>
           </div>
         </div>
 
-        <div>
+        <%!-- 말로 고치기. 결과는 **편집칸에 올려놓기만** 하고 저장은 사람이 누른다 —
+              프롬프트 한 줄이 영상 수십 편을 좌우하는데 말 한마디로 덮어쓰면
+              무엇이 언제 왜 바뀌었는지 아무도 모르게 된다. --%>
+        <form phx-submit="rewrite" class="mb-3">
+          <%!-- 한 줄짜리 칸이었는데, 실제로 넣는 지시는 여러 문단이라 앞이 안 보였다.
+                textarea 라서 Enter 는 줄바꿈이다 — 보내는 건 아래 버튼. --%>
+          <textarea
+            name="instruction"
+            rows="8"
+            placeholder="말로 고치기 — 예: 카메라가 절대 멈추지 않게 더 강하게 못 박아줘"
+            disabled={@rewriting}
+            class="textarea textarea-bordered w-full text-sm leading-relaxed"
+          >{@instruction}</textarea>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button type="submit" disabled={@rewriting} class="btn btn-secondary">
+              <span :if={@rewriting} class="loading loading-spinner loading-xs"></span>
+              {if @rewriting, do: "고치는 중…", else: "AI 로 고치기"}
+            </button>
+            <button
+              :if={@undo_body}
+              type="button"
+              phx-click="undo_rewrite"
+              class="btn btn-ghost"
+              title="AI 가 고치기 전으로"
+            >
+              되돌리기
+            </button>
+            <span class="text-xs opacity-60">Enter 는 줄바꿈입니다. 보낼 때 버튼을 누르세요.</span>
+          </div>
+        </form>
+
+        <div :if={@rewrite_error} class="alert alert-error mb-3 py-2 text-sm whitespace-pre-wrap">
+          {@rewrite_error}
+        </div>
+        <div :if={@rewrite_note} class="alert alert-info mb-3 py-2 text-sm">
+          {@rewrite_note} — <b>읽어 보고</b> 위의 '새 버전으로 저장' 을 누르세요. 아직 저장 전입니다.
+        </div>
+
+        <form phx-change="edit_body">
+          <textarea
+            name="body"
+            rows="34"
+            class="textarea textarea-bordered w-full font-mono text-[13px] leading-relaxed"
+            phx-debounce="400"
+          >{@body}</textarea>
+        </form>
+
+        <div :if={@stage != "agent"} class="mt-2 text-xs opacity-60">
+          쓸 수 있는 슬롯: project.aspect · project.target_sec · project.target_chars ·
+          scene_count · script · scenes · allowed_facts ·
+          style.clean_rules · style.camera_rules · style.global_style · style.asset_definitions ·
+          domain.info_rules · domain.element_list · domain.color_semantics · domain.video_topic_rules
+        </div>
+
+        <div :if={@stage == "agent"} class="mt-2 text-xs opacity-60">
+          이건 그림 프롬프트가 아니라 <b>무인 루프가 에이전트에게 주는 작업 절차</b>다.
+          변수 치환도 미리보기도 없다. 저장하면 다음 라운드부터 쓴다.
+          비우거나 너무 짧게 저장하면 서버에 박아둔 기본값으로 돌아간다 — 실수로 지워도 멈추지 않는다.
+        </div>
+      </div>
+
+      <%!-- 그림 프롬프트를 고칠 때만 필요한 것들. agent 탭에서는 아예 감춘다. --%>
+      <details :if={@stage != "agent"} class="group mt-6 rounded-lg border border-base-300">
+        <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold">
+          <span class="inline-block transition group-open:rotate-90">▸</span>
+          그림체 · 장르 · 미리보기
+          <span class="ml-1 text-xs font-normal opacity-60">
+            {(@style && @style.name) || "그림체 없음"} · {(@domain && @domain.name) || "장르 없음"}
+          </span>
+        </summary>
+
+        <div class="grid gap-6 border-t border-base-300 p-4 lg:grid-cols-2">
           <h2 class="mb-2 font-semibold">그림체</h2>
 
           <form phx-change="select_style" class="mb-2">
@@ -535,7 +662,7 @@ defmodule VideoToolWeb.PromptLive do
             프로젝트를 고르면 실제로 Flow 에 들어갈 모습을 보여줍니다.
           </div>
         </div>
-      </div>
+      </details>
     </Layouts.app>
     """
   end

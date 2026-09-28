@@ -141,8 +141,11 @@ defmodule VideoToolWeb.Layouts do
           <.theme_toggle />
         </header>
 
+        <%!-- 폭을 제한하지 않는다. max-w 를 걸면 왼쪽 사이드바(240px)만큼 밀린 자리에서
+              가운데 정렬돼, 넓은 화면일수록 **본문이 오른쪽으로 치우쳐** 보인다.
+              프롬프트·대본처럼 긴 글을 읽는 화면이 많아서 폭은 넓을수록 낫다. --%>
         <main class="px-4 py-6 pb-24 sm:px-6 md:pb-6 lg:px-8">
-          <div class="mx-auto max-w-[1600px] space-y-4">
+          <div class="w-full space-y-4">
             {render_slot(@inner_block)}
           </div>
         </main>

@@ -60,6 +60,10 @@ defmodule VideoToolWeb.Router do
     get "/work/jobs", ApiController, :jobs
     get "/work/summary", ApiController, :summary
 
+    # 무인 루프가 자기 토큰을 읽어간다. 컨트롤러가 **루프백에서 온 요청만** 받는다 —
+    # 터널을 타고 들어온 요청에는 값을 주지 않는다.
+    get "/settings/:name", ApiController, :read_secret
+
     get "/projects", ApiController, :list_projects
     post "/projects", ApiController, :create_project
     get "/projects/:id", ApiController, :get_project
