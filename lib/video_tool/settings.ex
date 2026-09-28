@@ -19,7 +19,10 @@ defmodule VideoTool.Settings do
     {:google_client_secret, "settings/google_client_secret", "GOOGLE_CLIENT_SECRET",
      "구글 OAuth 클라이언트 시크릿", "위 클라이언트 ID 와 한 쌍."},
     {:elevenlabs_api_key, "settings/elevenlabs_api_key", "ELEVENLABS_API_KEY", "일레븐랩스 API 키",
-     "나레이션(generate_narration). 권한: Text to Speech 필수, 목소리를 찾으려면 Voices 읽기."}
+     "나레이션(generate_narration). 권한: Text to Speech 필수, 목소리를 찾으려면 Voices 읽기."},
+    {:claude_token, "settings/claude_token", "CLAUDE_CODE_OAUTH_TOKEN", "Claude 에이전트 토큰",
+     "무인 루프의 두뇌. 없으면 루프가 깨어나도 'Not logged in' 한 줄 남기고 끝난다. " <>
+       "만드는 법: 아무 PC 에서 `claude setup-token` (1년짜리). 만료되면 여기만 갈아끼우면 된다."}
   ]
 
   # 힉스필드 키는 두지 않는다 — 이미지·영상은 Flow, 캐릭터 립싱크는 에이전트가 힉스필드 MCP 로.
@@ -133,6 +136,12 @@ defmodule VideoTool.Settings do
         label: "Flow 브라우저",
         enables: "Flow 자동 조종",
         hint: "launch-chrome.ps1 실행 후 구글 로그인"
+      },
+      claude_token: %{
+        ready: set?(:claude_token),
+        label: "Claude 에이전트 토큰",
+        enables: "무인 제작 (대본·장면·배정 판단)",
+        hint: "아무 PC 에서 `claude setup-token` → 나온 sk-ant-oat01-… 을 여기 붙여넣기"
       }
     }
   end

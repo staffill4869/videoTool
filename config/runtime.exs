@@ -23,6 +23,25 @@ end
 config :video_tool, VideoToolWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4300"))]
 
+# 구글 OAuth 콜백 주소. 기본값은 `http://localhost:4300/oauth/google/callback` 이다.
+#
+# 서버(EC2)에서는 4300 을 밖으로 열지 않으므로 그 주소로는 콜백이 못 온다.
+# SSH 터널을 로컬 4301 → 서버 4300 으로 잡고 여기를 4301 로 바꾸면 된다.
+# **GCP 를 안 건드려도 된다** — 데스크톱 앱 클라이언트는 loopback(localhost/127.0.0.1)
+# 주소에 한해 포트를 따지지 않는다.
+if uri = System.get_env("GOOGLE_REDIRECT_URI") do
+  config :video_tool, :google_redirect_uri, uri
+end
+
+# 한 채널에 하루 몇 편까지 올릴지. 무인 루프가 폭주해 한 채널에 8편을 올린 적이 있다
+# (2026-09-23). 0 으로 두면 상한 없음 — 권하지 않는다.
+if cap = System.get_env("DAILY_PUBLISH_CAP") do
+  case Integer.parse(cap) do
+    {n, ""} when n >= 0 -> config :video_tool, :daily_publish_cap, n
+    _ -> raise "DAILY_PUBLISH_CAP 은 0 이상의 정수여야 합니다: #{cap}"
+  end
+end
+
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
   config :video_tool, VideoToolWeb.Endpoint,

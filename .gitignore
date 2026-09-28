@@ -49,6 +49,20 @@ erl_crash.dump
 # 자격증명. .env.example 을 복사해서 쓴다.
 /.env
 
+# SSH·서버 키. 지금은 저장소 **밖**(C:\rebase\videoTool\AWS\)에 두지만,
+# 저장소 이름이 videoTool 이고 폴더는 videoCRM 이라 헷갈리기 쉽다 —
+# 실제로 다른 세션이 "키가 저장소 안에 있다" 고 잘못 읽은 적이 있다(2026-09-23).
+# 누가 옮겨 놓더라도 커밋되지 않게 막아 둔다. 한 번 올라가면 되돌릴 수 없다.
+*.pem
+*.key
+*.p12
+/AWS/
+
+# 서버에 실제로 올라간 cloudflared 설정에는 터널 UUID·크리덴셜 경로가 들어 있다.
+# 저장소에는 config.example.yml 만 둔다.
+/deploy/**/config.yml
+/deploy/**/*credentials*.json
+
 # 생성물. 여기에 영상·이미지·음성이 쌓인다 — 한 편에 수십 MB 라
 # 한 번 커밋되면 저장소에서 영구히 안 빠진다. 코드가 아니라 산출물이다.
 /projects/
@@ -84,3 +98,9 @@ lines*.json
 
 # 배경 음악 원본은 bgm/CREDITS.md 의 주소에서 다시 받는다
 bgm/*.mp3
+
+# 작업용 임시 스크립트 (서버에 붙여넣는 .exs, 프롬프트 사본 등)
+/.tmp/
+# 다른 에이전트가 남긴 서버 로그
+/server-codex.log
+/server-codex.err

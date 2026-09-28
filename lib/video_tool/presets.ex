@@ -113,7 +113,10 @@ defmodule VideoTool.Presets.PromptTemplate do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @stages ~w(clean info video tts)
+  # agent = 무인 루프가 에이전트에게 주는 지시문. 그림 프롬프트가 아니라 **작업 절차**다.
+  # 여기 두는 이유: 이게 제일 자주 바뀌는데, bash 파일 안에 있으면 서버에 들어가야만
+  # 고칠 수 있다. 화면에서 고치고 다음 라운드부터 바로 먹게 한다.
+  @stages ~w(clean info video tts agent)
 
   schema "prompt_templates" do
     field :stage, :string

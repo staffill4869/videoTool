@@ -26,6 +26,28 @@ defmodule VideoToolWeb.ApiController do
 
   def summary(conn, _params), do: json(conn, %{ok: true, summary: Work.summary()})
 
+  @doc """
+  무인 루프가 자기 토큰을 읽어가는 곳.
+
+  **비밀을 돌려주므로 같은 기계에서 부를 때만 응답한다.** 터널(Cloudflare) 을 타고
+  들어온 요청은 원격 주소가 루프백이 아니므로 거절된다 — 화면이 Access 뒤에 있어도
+  이 값만은 밖으로 내보내지 않는다.
+
+  읽기 전용이다. 값을 넣는 건 `/settings` 화면에서만 한다.
+  """
+  def read_secret(conn, %{"name" => name}) do
+    cond do
+      conn.remote_ip not in [{127, 0, 0, 1}, {0, 0, 0, 0, 0, 0, 0, 1}] ->
+        conn |> put_status(:forbidden) |> json(%{ok: false, error: "로컬에서만 읽을 수 있습니다"})
+
+      name != "claude_token" ->
+        conn |> put_status(:not_found) |> json(%{ok: false, error: "모르는 설정: #{name}"})
+
+      true ->
+        json(conn, %{ok: true, value: VideoTool.Settings.get(:claude_token)})
+    end
+  end
+
   # ── 프로젝트 ────────────────────────────────────────────────────
 
   def list_projects(conn, _params) do

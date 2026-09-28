@@ -1,0 +1,24 @@
+{
+  "_주석": [
+    "서버(리눅스)에서 무인 루프가 쓰는 권한 설정. ~/videoCRM/.claude/settings.local.json 에 둔다.",
+    "도구를 하나씩 적지 않고 서버 단위로 허용한다 — 툴이 하나 늘 때마다 여기가 막히면",
+    "에이전트가 '권한이 승인되지 않아 막혔습니다' 한 줄 남기고 아무것도 안 하고 끝난다(실측 2026-09-23).",
+    "대신 위험한 것만 deny 로 막는다.",
+    "힉스필드 MCP 는 이 서버에 없다 — 음성은 generate_narration(일레븐랩스 직접)으로 만든다."
+  ],
+  "enabledMcpjsonServers": ["videocrm"],
+  "disabledMcpjsonServers": ["tidewave"],
+  "permissions": {
+    "allow": [
+      "mcp__videocrm",
+      "mcp__videotool",
+      "Read",
+      "Glob",
+      "Grep"
+    ],
+    "deny": [
+      "mcp__videocrm__drop_assets",
+      "mcp__videotool__drop_assets"
+    ]
+  }
+}
