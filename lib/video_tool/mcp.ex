@@ -1123,7 +1123,17 @@ defmodule VideoTool.MCP do
           cond do
             ready -> "준비됐습니다. set_pipeline(pipeline: \"flow_auto\") 로 켜세요."
             status[:flow_tab] != true -> "Chrome 에서 Flow 탭을 열어두세요."
-            true -> "Flow 에 구글 로그인이 필요합니다. 사람이 직접 로그인하세요."
+            # 홈·소개 화면은 입력칸이 없는 게 정상이다. 로그인 버튼이 보일 때만 사람을 부른다.
+            status[:page] == "login" or status[:signed_in] == false ->
+              "Flow 에 구글 로그인이 필요합니다. 사람이 직접 로그인하세요."
+
+            status[:page] == "landing" ->
+              "Flow 홈 화면입니다(로그인됨). flow_new_project(project_id) 로 편집기를 여세요 — 사람이 열 필요 없습니다."
+
+            status[:page] == "editor" ->
+              "편집기인데 입력칸을 못 찾았습니다. priv/flow_driver/selectors.json 의 promptBox 를 보세요."
+
+            true -> "Flow 페이지가 아닙니다. flow_new_project(project_id) 로 여세요."
           end
         )
 
