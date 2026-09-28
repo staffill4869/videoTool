@@ -340,12 +340,51 @@ defmodule VideoTool.Series do
   @doc """
   이 시리즈로 프로젝트를 하나 만든다. 대본은 비어 있다 — 에이전트가 쓴다.
   """
+  @doc """
+  이 시리즈에서 이미 쓴 제목과 주제. 최근 것부터.
+
+  새 편 주제를 고르는 쪽(에이전트·사람)이 무엇을 피해야 하는지 보려면 이게 필요하다.
+  `list_projects` 로는 안 보인다 — 거기는 기본이 "아직 안 끝난 편"만 내준다.
+  """
+  def used_topics(series_id, limit \\ 12) do
+    Repo.all(
+      from p in Project,
+        where: p.series_id == ^series_id,
+        order_by: [desc: p.id],
+        limit: ^limit,
+        select: {p.title, p.topic}
+    )
+  end
+
+  # 같은 주제로 두 번 만들지 않는다.
+  #
+  # 2026-09-23: 시리즈 5 의 #8·#9·#10·#13 이 전부 **시리즈 기본 주제 그대로** 만들어졌다.
+  # `topic` 을 안 주면 `topic_brief` 로 떨어지는데, 그건 시리즈 설명이지 이번 편 주제가
+  # 아니다. 같은 브리프를 받은 에이전트는 매번 비슷한 대본을 썼고, 거의 같은 영상이
+  # 네 편 올라갔다. 프롬프트에 "겹치지 않게" 라고 적어두는 것으로는 못 막는다.
+  #
+  # 글자가 정확히 같은 것만 막는다 — 비슷한 주제까지는 문자열로 가를 수 없다.
+  defp topic_is_new(series, topic) do
+    key = String.trim(topic || "")
+    used = used_topics(series.id)
+
+    if key != "" and Enum.any?(used, fn {_t, u} -> String.trim(u || "") == key end) do
+      {:error,
+       "이 주제는 이 시리즈에서 이미 만들었습니다. 이번 편 주제를 따로 정해서 " <>
+         "topic 으로 넘기세요 (시리즈 기본 주제를 그대로 쓰면 같은 영상이 또 나옵니다). " <>
+         "지금까지: " <> Enum.map_join(used, " / ", fn {t, _u} -> t end)}
+    else
+      :ok
+    end
+  end
+
   def spawn_project(%Recipe{} = series, opts \\ []) do
     title = opts[:title] || "#{series.name} ##{series.created_count + 1}"
+    topic = opts[:topic] || series.topic_brief
 
     attrs = %{
       "title" => title,
-      "topic" => opts[:topic] || series.topic_brief,
+      "topic" => topic,
       "target_sec" => series.target_sec,
       "aspect" => series.aspect,
       "style_slug" => series.style.slug,
@@ -358,7 +397,8 @@ defmodule VideoTool.Series do
       "subtitle_font" => series.subtitle_font || ""
     }
 
-    with {:ok, project} <- Projects.create_project(attrs),
+    with :ok <- topic_is_new(series, topic),
+         {:ok, project} <- Projects.create_project(attrs),
          {:ok, project} <-
            project |> Ecto.Changeset.change(series_id: series.id) |> Repo.update() do
       {:ok, _} =

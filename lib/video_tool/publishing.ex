@@ -240,6 +240,7 @@ defmodule VideoTool.Publishing do
       project_id: project.id,
       channel_id: channel.id,
       render_id: render.id,
+      # 새 행에만 쓴다 — 아래 changeset 에서 기존 행이면 지운다.
       status: "draft",
       title: title,
       description: description,
@@ -260,8 +261,17 @@ defmodule VideoTool.Publishing do
 
     changeset =
       case existing do
-        nil -> Publication.changeset(%Publication{}, params)
-        row -> Publication.changeset(row, params)
+        nil ->
+          Publication.changeset(%Publication{}, params)
+
+        # 이미 있는 행의 status 는 건드리지 않는다.
+        #
+        # 2026-09-23: 에이전트가 발행이 끝난 행에 제목을 다시 저장했다. status 가
+        # "published" → "draft" 로 되돌아가면서 `already_published?` 가 풀렸고,
+        # 같은 영상이 다시 올라갔다 (그리고 유튜브 일일 한도에 걸려 failed 로 남았다).
+        # 남은 증거: 32번 행은 status=draft 인데 external_id·published_at 이 차 있다.
+        row ->
+          Publication.changeset(row, Map.delete(params, :status))
       end
 
     with {:ok, publication} <- Repo.insert_or_update(changeset) do
@@ -301,7 +311,11 @@ defmodule VideoTool.Publishing do
       {channel.max_duration_sec == 0 or render.duration_sec <= channel.max_duration_sec,
        "길이 #{Float.round(render.duration_sec, 1)}초가 채널 상한 #{channel.max_duration_sec}초를 넘습니다"},
       {not already_published?(project, channel, render),
-       "같은 렌더가 이미 이 채널에 발행됐습니다 (중복 발행 차단)"}
+       "같은 렌더가 이미 이 채널에 발행됐습니다 (중복 발행 차단)"},
+      {under_daily_cap?(channel),
+       "오늘 이 채널에 이미 #{uploaded_today(channel)}편을 올렸습니다 " <>
+         "(하루 상한 #{daily_cap()}편). 내일 다시 하거나 상한을 올리세요 " <>
+         "— DAILY_PUBLISH_CAP 환경변수"}
     ]
 
     case Enum.reject(checks, fn {ok, _} -> ok end) do
@@ -332,13 +346,60 @@ defmodule VideoTool.Publishing do
   defp resolve_privacy(%Channel{default_privacy: "private"}, _asked), do: "private"
   defp resolve_privacy(channel, asked), do: asked || channel.default_privacy
 
+  # status 가 아니라 **영상 id 가 있으면** 이미 올라간 것이다. status 는 나중 단계가
+  # 덮어쓸 수 있지만(위 save_publish_meta 사고, 그리고 실패 기록), external_id 는
+  # 유튜브가 실제로 영상을 만들었다는 증거다. 되돌릴 수 없는 행위라 넓게 막는다.
   defp already_published?(project, channel, render) do
     Repo.exists?(
       from p in Publication,
         where:
           p.project_id == ^project.id and p.channel_id == ^channel.id and
-            p.render_id == ^render.id and p.status == "published"
+            p.render_id == ^render.id and
+            (p.status == "published" or p.external_id != "")
     )
+  end
+
+  # 하루에 이 채널로 몇 편까지 올릴지.
+  #
+  # 왜 필요한가 (실측 2026-09-23): 무인 루프가 같은 주제로 여러 편을 만들어
+  # 한 채널에 8편을 올렸다. 유튜브 일일 한도에도 걸렸다
+  # ("The user has exceeded the number of videos they may upload").
+  # `already_published?` 는 **같은 렌더**만 막아서, 새 프로젝트면 그냥 통과한다.
+  @daily_cap_default 3
+
+  @doc "하루 상한값. 0 이면 상한 없음."
+  def daily_cap, do: Application.get_env(:video_tool, :daily_publish_cap, @daily_cap_default)
+
+  @doc """
+  오늘 이 채널에 올라간 편 수. **status 가 아니라 external_id 로 센다.**
+
+  업로드는 성공했는데 뒤 단계(섬네일 등)가 실패해 `failed` 로 남은 행이 있다.
+  유튜브는 그것도 업로드로 세므로 우리도 세야 한다 — status 로만 세면
+  실패 기록을 보고 "아직 안 올렸네" 하며 또 올린다(2026-09-23 사고).
+  """
+  def uploaded_today(channel), do: count_uploaded_today(channel)
+
+  # 0 은 "상한 없음" 이다. 그 경우 세지도 않는다 — 켜 두면 안 되지만, 막는 쪽이
+  # 기본값이라 끄는 방법은 있어야 한다.
+  def under_daily_cap?(channel) do
+    case daily_cap() do
+      0 -> true
+      n -> uploaded_today(channel) < n
+    end
+  end
+
+  # 날짜는 UTC 기준이다. 유튜브의 한도 기준(태평양시)과 정확히 같지는 않지만,
+  # 여기 목적은 폭주를 막는 것이지 유튜브 한도를 흉내내는 게 아니다.
+  defp count_uploaded_today(channel) do
+    today = Date.utc_today()
+
+    Repo.one(
+      from p in Publication,
+        where:
+          p.channel_id == ^channel.id and p.external_id != "" and
+            fragment("(? AT TIME ZONE 'UTC')::date", p.updated_at) == ^today,
+        select: count(p.id)
+    ) || 0
   end
 
   @doc """

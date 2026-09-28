@@ -100,6 +100,12 @@ defmodule VideoTool.MCP do
         ["project_id", "stage"]
       ),
       tool(
+        "get_prompt_template",
+        "활성 프롬프트 템플릿 원문. 프로젝트 없이, 변수 치환 없이 그대로 준다",
+        %{"stage" => str("clean | info | video | tts | agent")},
+        ["stage"]
+      ),
+      tool(
         "report_flow_credits",
         "Flow 는 API 가 없어 화면에서 읽은 크레딧을 수동 입력한다",
         %{"project_id" => int("프로젝트 id"), "credits" => num("크레딧")},
@@ -345,9 +351,13 @@ defmodule VideoTool.MCP do
         "시리즈로 프로젝트를 지금 하나 만든다 (간격을 기다리지 않고)",
         %{
           "series_id" => int("시리즈 id"),
-          "topic" => str("이번 편 주제. 생략하면 시리즈 기본 주제")
+          "topic" =>
+            str(
+              "**이번 편** 주제 한 줄. 시리즈 기본 주제(설명문)를 그대로 넣지 마라 — " <>
+                "이미 만든 주제와 같으면 거부된다. 무엇이 이미 있는지는 list_series 의 recent 를 본다"
+            )
         },
-        ["series_id"]
+        ["series_id", "topic"]
       ),
       tool(
         "create_language_variant",
@@ -443,6 +453,19 @@ defmodule VideoTool.MCP do
     handle(name, args || %{})
   rescue
     e -> %{ok: false, error: "#{name} 실행 중 오류: #{Exception.message(e)}"}
+  end
+
+  # 활성 템플릿 원문을 그대로 준다. `render_prompt` 와 다른 점은 **프로젝트가 필요 없고
+  # 변수 치환도 안 한다**는 것이다. 무인 루프가 자기 지시문(stage: "agent")을
+  # 화면에서 고친 대로 읽어가는 데 쓴다.
+  defp handle("get_prompt_template", args) do
+    case Presets.fetch_template(args["stage"] || "") do
+      {:ok, t} ->
+        %{ok: true, stage: t.stage, version: t.version, body: t.body, chars: String.length(t.body)}
+
+      {:error, reason} ->
+        %{ok: false, error: reason}
+    end
   end
 
   defp handle("list_presets", args) do
@@ -795,6 +818,9 @@ defmodule VideoTool.MCP do
           interval_minutes: s.interval_minutes,
           languages: s.languages,
           created_count: s.created_count,
+          # 새 편 주제를 고르기 전에 무엇이 이미 있는지 봐야 한다.
+          # list_projects 로는 안 보인다 — 거기는 안 끝난 편만 내준다.
+          recent: Enum.map(Series.used_topics(s.id, 12), fn {t, u} -> %{title: t, topic: u} end),
           pending: Series.pending_count(s.id),
           next_run_at: s.next_run_at,
           last_error: s.last_error
@@ -805,11 +831,25 @@ defmodule VideoTool.MCP do
   end
 
   defp handle("run_series", args) do
-    with {:ok, series} <- Series.get(args["series_id"]),
-         {:ok, project} <- Series.spawn_project(series, topic: args["topic"]) do
-      %{ok: true, project_id: project.id, title: project.title, status: project.status}
-    else
-      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    case Series.get(args["series_id"]) do
+      {:error, reason} ->
+        %{ok: false, error: inspect_error(reason)}
+
+      {:ok, series} ->
+        case Series.spawn_project(series, topic: args["topic"]) do
+          {:ok, project} ->
+            %{ok: true, project_id: project.id, title: project.title, status: project.status}
+
+          {:error, reason} ->
+            # 거절만 하면 에이전트는 무엇을 피해야 하는지 모른 채 같은 주제를 다시 시도한다.
+            # 이미 만든 편을 같이 돌려줘야 한 턴 안에 다른 주제를 고른다.
+            %{
+              ok: false,
+              error: inspect_error(reason),
+              already_made:
+                Enum.map(Series.used_topics(series.id), fn {t, u} -> %{title: t, topic: u} end)
+            }
+        end
     end
   end
 
@@ -1014,7 +1054,7 @@ defmodule VideoTool.MCP do
          # 프로젝트를 스스로 연다. 여기서 prompt_box 를 요구하면 크롬을 새로 띄운
          # 직후처럼 홈 화면일 때 시작조차 못 한다. 붙을 수 있고 로그인돼 있으면 된다.
          {:ok, %{connected: true, page: page}} when page != "login" <- Flow.status(),
-         {:ok, job} <- Flow.run_stage_async(project, stage, text, length(want)) do
+         {:ok, job} <- Flow.run_stage_async(project, stage, text, length(want), want) do
       %{
         ok: true,
         job_id: job.id,

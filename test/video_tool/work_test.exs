@@ -118,7 +118,8 @@ defmodule VideoTool.WorkTest do
       {:ok, result} = Projects.create_language_variant(source, "en")
 
       assert result.scenes == 2
-      assert result.clean_reused == 2
+      # 반환 모양이 kind 별 맵으로 바뀐 뒤에도 이 줄만 옛 이름을 보고 있었다
+      assert result.reused["clean"] == 2
 
       # 같은 파일을 가리켜야 한다. 복사하면 같은 그림이 두 벌 생긴다.
       [a | _] = Media.list_assets(result.project.id, "clean")
