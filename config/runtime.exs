@@ -1,5 +1,39 @@
 import Config
 
+# ── .env ────────────────────────────────────────────────────────
+#
+# 자격증명을 시스템 환경변수에 넣게 하면 셸을 다시 열어야 하고, 무엇이 설정됐는지도 안 보인다.
+# 프로젝트 폴더의 `.env` 를 읽는다. 이미 있는 환경변수는 덮어쓰지 않는다 (배포 환경이 이긴다).
+# `.env` 는 .gitignore 에 있다.
+#
+# **맨 위에 있어야 한다.** 아래 설정들이 System.get_env 로 이 값을 읽는데,
+# .env 를 나중에 읽으면 그때는 아직 비어 있어서 조용히 기본값이 쓰인다
+# (DAILY_PUBLISH_CAP 을 6 으로 바꿔도 3 으로 돌던 이유였다 — systemd 가
+#  환경변수를 직접 넣어 줘서 서버에서만 우연히 맞았다).
+env_file = Path.join(File.cwd!(), ".env")
+
+if File.exists?(env_file) do
+  env_file
+  |> File.read!()
+  |> String.split(~r/\r?\n/)
+  |> Enum.each(fn line ->
+    line = String.trim(line)
+
+    unless line == "" or String.starts_with?(line, "#") do
+      case String.split(line, "=", parts: 2) do
+        [key, value] ->
+          key = String.trim(key)
+          value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
+          if System.get_env(key) in [nil, ""], do: System.put_env(key, value)
+
+        _ ->
+          :ok
+      end
+    end
+  end)
+end
+
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
@@ -153,34 +187,6 @@ if config_env() == :prod do
   #     config :swoosh, :api_client, Swoosh.ApiClient.Req
   #
   # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
-end
-
-# ── .env ────────────────────────────────────────────────────────
-#
-# 자격증명을 시스템 환경변수에 넣게 하면 셸을 다시 열어야 하고, 무엇이 설정됐는지도 안 보인다.
-# 프로젝트 폴더의 `.env` 를 읽는다. 이미 있는 환경변수는 덮어쓰지 않는다 (배포 환경이 이긴다).
-# `.env` 는 .gitignore 에 있다.
-env_file = Path.join(File.cwd!(), ".env")
-
-if File.exists?(env_file) do
-  env_file
-  |> File.read!()
-  |> String.split(~r/\r?\n/)
-  |> Enum.each(fn line ->
-    line = String.trim(line)
-
-    unless line == "" or String.starts_with?(line, "#") do
-      case String.split(line, "=", parts: 2) do
-        [key, value] ->
-          key = String.trim(key)
-          value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
-          if System.get_env(key) in [nil, ""], do: System.put_env(key, value)
-
-        _ ->
-          :ok
-      end
-    end
-  end)
 end
 
 # ── 구글 자격 ───────────────────────────────────────────────────
