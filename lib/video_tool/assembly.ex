@@ -12,8 +12,17 @@ defmodule VideoTool.Assembly do
 
   # 나레이션이 영상보다 길거나 짧을 때 장면 하나를 얼마나 늘리고 줄일지의 한계.
   # 이 범위를 벗어나면 배속으로 맞추지 않고 다른 수단을 쓴다 — 배속이 티가 나기 때문이다.
-  @speed_min 0.85
+  #
+  # 아래쪽 한계를 0.85 → 0.62 로 내렸다(2026-09-23, 속도감 요청).
+  # Flow 는 무조건 8초 클립을 낸다. 장면을 5.5초로 잡으면 f = 0.69 인데, 0.85 기준이면
+  # **배속이 아니라 앞을 2.5초 잘라냈다** — 카메라 움직임의 3분의 1이 사라질 뿐
+  # 빨라지지는 않는다. 0.62 로 내리면 8초가 5.5초로 **1.45배속**돼 같은 움직임이 빠르게 간다.
+  # 더 내리면(=1.6배 이상) 배속이 눈에 띄기 시작하므로 거기서 멈춘다.
+  @speed_min 0.62
   @speed_max 1.35
+
+  # 마지막 장면에 남기는 여운. 0 이면 말 끝나자마자 뚝 끊기고, 길면 무음이 남는다.
+  @last_tail_sec 1.0
 
   # ── 나레이션 저장 · 정렬 ────────────────────────────────────────
 
@@ -137,9 +146,14 @@ defmodule VideoTool.Assembly do
           # 마지막 장면은 통째로. 음성이 없는 장면도 클립 길이 그대로 둔다.
           # **클립보다 길게 잡지 않는다.** 8초짜리에 8.5초를 요구하면 잘라 봐야 8초만 나오고,
           # 시간표만 0.5초 앞서 가서 그 차이가 뒤로 계속 쌓인다 (드리프트의 정체다).
+          # 마지막 장면도 **여운만** 주고 자른다.
+          # 예전에는 클립을 통째로 남겼는데(8초), 대사가 3초면 5초가 무음으로 남았다.
+          # 쇼츠에서 그 구간은 그냥 이탈이고, `validate(final)` 도 "완성본과 나레이션이
+          # 2초 넘게 어긋난다"로 발행을 막는다(실측 2026-09-23, 77번: 42.2 vs 37.4).
           d =
             cond do
-              scene.id == last.id or is_nil(spoken) -> clip
+              is_nil(spoken) -> clip
+              scene.id == last.id -> min(spoken + @last_tail_sec, clip)
               true -> min(spoken * 1.0, clip)
             end
           stop = Float.round(cursor + d, 3)
@@ -905,9 +919,13 @@ defmodule VideoTool.Assembly do
     |> Enum.flat_map(fn scene ->
       with %{"start" => from0, "end" => stop} <- Map.get(timing, scene.id),
            [_ | _] = labels <- scene.expected_labels do
-        text = labels |> Enum.take(2) |> Enum.join("   ·   ")
-        from = from0 + 0.35
-        to = min(from + 3.2, stop - 0.25)
+        # **하나만 올린다.** 96pt 로 키운 뒤 두 개를 `·` 로 붙이면 폭 1080 을 넘겨
+        # 줄이 바뀌고, 숫자와 단위가 갈리면서 수치가 죽는다(2026-09-22 교훈).
+        # 여러 개를 보여줘야 하면 장면을 나누는 게 맞다.
+        text = labels |> Enum.take(1) |> Enum.join()
+        from = from0 + 0.3
+        # 장면이 5.5초로 짧아졌다. 3.2초를 붙들면 장면 내내 떠 있는 꼴이 된다.
+        to = min(from + 2.4, stop - 0.25)
 
         # 스치듯 지나가면 읽히지 않는다. 0.8초를 못 채우면 아예 안 넣는다.
         if to - from >= 0.8,
@@ -925,9 +943,14 @@ defmodule VideoTool.Assembly do
     {w, h, size, margin_x, margin_v, label_size, label_v} =
       case aspect do
         # 세로는 폭이 1080 뿐이다. 글자를 키우면 두세 글자마다 줄이 바뀐다.
-        # 좌우 여백을 넉넉히 두고(각 80) 글자는 52pt — 한 줄에 13~15자가 들어간다.
-        "9:16" -> {1080, 1920, 52, 80, 260, 58, 150}
-        _ -> {1920, 1080, 54, 120, 90, 56, 70}
+        #
+        # 2026-09-23 요청으로 둘 다 키웠다:
+        #   아래 자막(size)      52 → 68  (1.3배). 한 줄 13~15자 → 10~11자로 줄어
+        #                        두 줄이 세 줄이 되기 쉽다. 그래서 좌우 여백을 80 → 60 으로
+        #                        줄여 폭을 벌고, 아래 여백도 260 → 210 으로 내렸다.
+        #   위쪽 라벨(label_size) 58 → 96. 대신 **핵심 단어 하나만** 올린다(label_lines 참고)
+        "9:16" -> {1080, 1920, 68, 60, 210, 96, 170}
+        _ -> {1920, 1080, 70, 120, 90, 84, 80}
       end
 
     """
@@ -940,8 +963,11 @@ defmodule VideoTool.Assembly do
 
     [V4+ Styles]
     Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+    ; Label 은 2026-09-23 요청으로 외곽선·그림자를 뺐다(Outline 0, Shadow 0)
+    ; 색은 흰색(&H00FFFFFF). 우리 화면은 어두운 스튜디오라 흰 글자가 읽힌다 —
+    ; 밝은 배경 그림체로 바꾸면 이 줄을 검은색(&H00000000)으로 되돌려야 한다.
     Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,3,1,2,#{margin_x},#{margin_x},#{margin_v},1
-    Style: Label,#{font},#{label_size},&H0066D9FF,&H00101010,&HA0000000,1,1,3,2,8,#{margin_x},#{margin_x},#{label_v},1
+    Style: Label,#{font},#{label_size},&H00FFFFFF,&H00000000,&H00000000,1,1,0,0,8,#{margin_x},#{margin_x},#{label_v},1
 
     [Events]
     Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

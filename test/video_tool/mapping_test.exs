@@ -95,4 +95,29 @@ defmodule VideoTool.MappingTest do
     [{_id, {scene_id, _}}] = Map.to_list(Mapping.assign(project, "clean", [fresh]))
     assert scene_id == s1.id
   end
+
+  test "이번에 요청한 장면 안에서만 배정한다", ctx do
+    [_s1, _s2, s3, _s4] = ctx.scenes
+
+    fresh = asset!(ctx.project, nil, "clean", "wanted_3.png")
+    {:ok, project} = Projects.get_project(ctx.project.id)
+
+    [{_id, {scene_id, _}}] = Map.to_list(Mapping.assign(project, "clean", [fresh], [3]))
+
+    assert scene_id == s3.id,
+           "3번만 요청했는데 다른 장면에 붙었다 — 회수 배정이 요청 장면을 모른다"
+  end
+
+  test "INFO 도 요청한 장면을 따른다 — 유사도가 애매해도", ctx do
+    [s1, s2 | _] = ctx.scenes
+    asset!(ctx.project, s1.id, "clean", "clean_1.png")
+
+    fresh = asset!(ctx.project, nil, "info", "info_for_1.png")
+    {:ok, project} = Projects.get_project(ctx.project.id)
+
+    [{_id, {scene_id, _}}] = Map.to_list(Mapping.assign(project, "info", [fresh], [1]))
+
+    refute scene_id == s2.id, "1번을 요청했는데 2번에 붙었다 (73번에서 실제로 난 일)"
+    assert scene_id == s1.id
+  end
 end
