@@ -383,13 +383,22 @@ defmodule VideoTool.Assembly do
 
   defp find_mark(text, lo, hi, target, marks) do
     lo..hi//1
-    |> Enum.filter(&(String.at(text, &1) in marks))
+    |> Enum.filter(&(String.at(text, &1) in marks and not thousands_comma?(text, &1)))
     |> Enum.min_by(&abs(&1 - target), fn -> nil end)
     |> case do
       nil -> nil
       i -> i + 1
     end
   end
+
+  # **천 단위 쉼표에서 자르지 않는다.** 98편에서 "2,500만 원" 이 여기서 잘려
+  # 화면에 "500만 원" 으로 떴다. 금액이 다섯 배 틀리는 자막이 나간 뻔했다.
+  defp thousands_comma?(text, i) do
+    String.at(text, i) == "," and digit?(String.at(text, i - 1)) and digit?(String.at(text, i + 1))
+  end
+
+  defp digit?(nil), do: false
+  defp digit?(c), do: c =~ ~r/^[0-9]$/
 
   defp allocate(list, from, to) do
     weights = Enum.map(list, &max(String.length(&1), 1))

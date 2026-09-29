@@ -38,4 +38,16 @@ defmodule VideoTool.SubtitleChunkTest do
     assert String.length(b) >= 6, "뒤 토막이 너무 짧다: #{b}"
     assert abs(String.length(a) - String.length(b)) <= 6
   end
+
+  # 98편에서 "2,500만 원" 이 천 단위 쉼표에서 잘려 "500만 원" 으로 떴다.
+  # 금액이 다섯 배 틀린 자막이 나갈 뻔했다.
+  test "천 단위 쉼표에서는 자르지 않는다" do
+    parts = Assembly.chunk("외국인 근로자 기숙사를 고치면 포항시가 2,500만 원까지 지원합니다.")
+
+    assert Enum.any?(parts, &String.contains?(&1, "2,500")),
+           "2,500 이 쪼개졌다: #{inspect(parts)}"
+
+    refute Enum.any?(parts, &String.starts_with?(&1, "500")),
+           "천 단위 쉼표에서 잘렸다: #{inspect(parts)}"
+  end
 end
