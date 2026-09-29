@@ -390,6 +390,14 @@ defmodule VideoTool.Publishing do
 
   # 날짜는 UTC 기준이다. 유튜브의 한도 기준(태평양시)과 정확히 같지는 않지만,
   # 여기 목적은 폭주를 막는 것이지 유튜브 한도를 흉내내는 게 아니다.
+  # **`published_at` 으로 센다. `updated_at` 이 아니다.**
+  #
+  # 처음엔 updated_at 으로 셌는데, 그 값은 제목만 다시 저장해도 올라간다.
+  # 9/23 에 올린 편 세 개를 에이전트가 오늘 save_publish_meta 로 건드리자
+  # 그것들이 "오늘 올린 것" 으로 잡혀, 실제로는 네 편만 올렸는데 상한 6 에
+  # 걸려 루프가 멈췄다(2026-09-28 실측).
+  #
+  # published_at 은 업로드가 성공한 그 순간에만 찍힌다.
   defp count_uploaded_today(channel) do
     today = Date.utc_today()
 
@@ -397,7 +405,8 @@ defmodule VideoTool.Publishing do
       from p in Publication,
         where:
           p.channel_id == ^channel.id and p.external_id != "" and
-            fragment("(? AT TIME ZONE 'UTC')::date", p.updated_at) == ^today,
+            not is_nil(p.published_at) and
+            fragment("(? AT TIME ZONE 'UTC')::date", p.published_at) == ^today,
         select: count(p.id)
     ) || 0
   end

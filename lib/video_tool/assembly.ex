@@ -406,7 +406,14 @@ defmodule VideoTool.Assembly do
           # 어떤 폰트로 구웠는지 남긴다. 나중에 "이 편만 글자가 다르다" 를 추적하려면 필요하다.
           "subtitle_font" => font
         },
-        file_size: File.stat!(final).size
+        file_size: File.stat!(final).size,
+        # **섬네일을 물려받는다.**
+        #
+        # 합성은 부를 때마다 렌더 행을 새로 만든다. 그런데 정상 흐름이
+        # 「합성 → check_video → 고침 → 재합성」 이라, 붙여 둔 섬네일이 옛 행에
+        # 남고 발행은 최신 행을 본다 — 그래서 올린 영상 22편 전부 섬네일이
+        # 없었다(2026-09-29 실측). 파일은 그대로 있으니 경로만 이어 준다.
+        thumbnail_path: inherited_thumbnail(project.id)
       }
 
       with {:ok, render} <- Media.create_render(attrs) do
@@ -425,6 +432,18 @@ defmodule VideoTool.Assembly do
 
   # 나레이션을 장면 길이에 맞춰 저장했으면(tight) 클립 뒤를 잘라 쓴다.
   # 그게 아니면 예전대로 클립을 통째로 쓴다.
+  @doc false
+  # 이 편에 이미 붙여 둔 섬네일. 파일이 없어졌으면 물려받지 않는다.
+  def inherited_thumbnail(project_id) do
+    Media.renders(project_id)
+    |> Enum.filter(&(&1.kind == "final" and (&1.thumbnail_path || "") != ""))
+    |> List.last()
+    |> case do
+      nil -> ""
+      r -> if File.exists?(Path.expand(r.thumbnail_path)), do: r.thumbnail_path, else: ""
+    end
+  end
+
   defp fit_mode(narration) do
     if Enum.any?(List.wrap(narration.scene_timing), &(&1["mode"] == "tight")),
       do: :scenes,
@@ -776,25 +795,9 @@ defmodule VideoTool.Assembly do
       ["-f", "concat", "-safe", "0", "-i", list, "-i", narration.file_path] ++
         if bgm, do: ["-stream_loop", "-1", "-i", bgm], else: []
 
-    # 나레이션이 위, 효과음은 낮게, 음악은 더 낮게.
-    layers =
-      (if sfx?, do: ["[0:a]volume=0.25[sfx]"], else: []) ++
-        (if bgm, do: ["[2:a]volume=0.10[bgm]"], else: []) ++
-        ["[1:a]volume=1.0,apad[nar]"]
-
-    mixed = (if sfx?, do: ["[sfx]"], else: []) ++ (if bgm, do: ["[bgm]"], else: []) ++ ["[nar]"]
-
     audio =
       if sfx? or bgm do
-        [
-          "-filter_complex",
-          Enum.join(layers, ";") <>
-            ";" <>
-            Enum.join(mixed) <>
-            "amix=inputs=#{length(mixed)}:duration=longest:dropout_transition=0," <>
-            "dynaudnorm=p=0.9[a]",
-          "-map", "[a]"
-        ]
+        ["-filter_complex", audio_filter(sfx?, not is_nil(bgm)), "-map", "[a]"]
       else
         # 소리 없는 클립에 음악도 없다 — 나레이션만 싣고 뒤는 무음으로 채운다.
         ["-map", "1:a:0", "-af", "apad"]
@@ -813,6 +816,31 @@ defmodule VideoTool.Assembly do
         ]
 
     done(args, out)
+  end
+
+  @doc false
+  # 소리 세 겹(클립 효과음 · 배경 음악 · 나레이션)을 하나로 섞는 필터.
+  # 나레이션이 위, 효과음은 -12dB, 음악은 -23dB. 레벨은 **고정이다.**
+  #
+  # **dynaudnorm 을 다시 끼우지 마라.** 15초짜리 창으로 이득을 계속 다시 잡아서
+  # 앞부분이 조용하다가 중간에 소리가 확 커진다 — 58편 실측으로 0초 -27.0 LUFS 에서
+  # 16초 -15.8 LUFS 까지 11dB 올라갔다. 나레이션 파일 자체는 평평했고 합성본만 출렁였다.
+  # amix 도 normalize=0 이어야 한다. 기본값(1) 은 입력 수로 나눠서 소리를 죽이고,
+  # 그걸 메우려고 자동 정규화를 붙이면 위 문제가 그대로 돌아온다.
+  # 지금 값: -20.3 LUFS · LRA 2.1 · 피크 -1.5 dBFS.
+  def audio_filter(sfx?, bgm?) do
+    layers =
+      (if sfx?, do: ["[0:a]volume=0.35[sfx]"], else: []) ++
+        (if bgm?, do: ["[2:a]volume=0.14[bgm]"], else: []) ++
+        ["[1:a]volume=1.4,apad[nar]"]
+
+    mixed = (if sfx?, do: ["[sfx]"], else: []) ++ (if bgm?, do: ["[bgm]"], else: []) ++ ["[nar]"]
+
+    Enum.join(layers, ";") <>
+      ";" <>
+      Enum.join(mixed) <>
+      "amix=inputs=#{length(mixed)}:duration=longest:dropout_transition=0:normalize=0," <>
+      "alimiter=limit=0.95[a]"
   end
 
   @doc """

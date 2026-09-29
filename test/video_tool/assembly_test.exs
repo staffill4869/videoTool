@@ -17,4 +17,23 @@ defmodule VideoTool.AssemblyTest do
     assert [{1, 0.3, offset1}, {2, 0.08, _}] = plan
     assert_in_delta offset1, 7.92, 0.001
   end
+
+  # 소리가 영상 중간에 커지던 원인은 dynaudnorm 이었다 (58편: 0초 -27.0 → 16초 -15.8 LUFS).
+  # 레벨이 고정인지, 자동 정규화가 다시 안 끼었는지 여기서 막는다.
+  test "합성 오디오 레벨은 고정이고 자동 정규화가 없다" do
+    for {sfx?, bgm?} <- [{true, true}, {true, false}, {false, true}] do
+      f = Assembly.audio_filter(sfx?, bgm?)
+
+      refute f =~ "dynaudnorm"
+      refute f =~ "loudnorm"
+      assert f =~ "normalize=0"
+      assert f =~ "alimiter"
+      assert f =~ "[1:a]volume=1.4,apad[nar]"
+    end
+
+    # 섞는 갈래 수가 실제 입력 수와 맞아야 한다 — 어긋나면 ffmpeg 가 통째로 실패한다.
+    assert Assembly.audio_filter(true, true) =~ "amix=inputs=3"
+    assert Assembly.audio_filter(true, false) =~ "amix=inputs=2"
+    assert Assembly.audio_filter(false, false) =~ "amix=inputs=1"
+  end
 end

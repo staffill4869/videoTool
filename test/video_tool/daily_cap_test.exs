@@ -101,6 +101,18 @@ defmodule VideoTool.DailyCapTest do
     assert saved.status == "draft"
   end
 
+
+  test "제목만 다시 저장한 옛 발행물은 오늘 것으로 세지 않는다" do
+    ch = channel()
+    old = pub(ch, "published", "old", days_ago: 5)
+    # 오늘 메타만 건드린다 — updated_at 은 오늘이 되지만 published_at 은 그대로다
+    Repo.update!(Ecto.Changeset.change(old, updated_at: DateTime.utc_now() |> DateTime.truncate(:second)))
+
+    pub(ch, "published", "new")
+
+    assert Publishing.uploaded_today(ch) == 1
+  end
+
   # ── fixtures ────────────────────────────────────────────────────
   # publications 는 project·channel·render 가 전부 NOT NULL FK 라 최소 그래프가 필요하다.
 
@@ -158,6 +170,8 @@ defmodule VideoTool.DailyCapTest do
       render_id: r.id,
       status: status,
       external_id: external_id,
+      # 올린 시각. 안 올린 초안은 nil 이다 — 상한은 이 값을 본다.
+      published_at: if(external_id == "", do: nil, else: at),
       inserted_at: at,
       updated_at: at
     })
