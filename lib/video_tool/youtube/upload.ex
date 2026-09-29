@@ -18,6 +18,18 @@ defmodule VideoTool.YouTube.Upload do
   @insert_url "https://www.googleapis.com/upload/youtube/v3/videos"
   @thumbnail_url "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
   @captions_url "https://www.googleapis.com/upload/youtube/v3/captions"
+  @comments_url "https://www.googleapis.com/youtube/v3/commentThreads"
+
+  # 올린 뒤 채널 이름으로 남기는 첫 댓글. 쇼츠는 설명을 잘 안 열어 보므로
+  # 구독 유도는 여기가 제일 잘 보인다.
+  #
+  # 할당량을 본다: 업로드 1,600 · 댓글 50 유닛이고 하루 한도가 10,000 이다.
+  # 6편이면 9,600 + 300 = 9,900 으로 겨우 들어간다. 편수를 더 늘리려면
+  # 여기를 먼저 끄는 게 낫다 — 댓글 때문에 업로드가 막히면 손해가 크다.
+  @first_comment """
+  도움이 되셨다면 구독과 좋아요 부탁드립니다.
+  궁금한 점은 댓글로 남겨 주세요.
+  """
   @chunk 8 * 1024 * 1024
 
   @doc """
@@ -35,7 +47,8 @@ defmodule VideoTool.YouTube.Upload do
          video_id: video_id,
          url: "https://youtu.be/#{video_id}",
          thumbnail: maybe_thumbnail(token, video_id, render),
-         captions: maybe_captions(token, video_id, publication, project)
+         captions: maybe_captions(token, video_id, publication, project),
+         comment: maybe_comment(token, video_id, publication)
        }}
     end
   end
@@ -129,6 +142,34 @@ defmodule VideoTool.YouTube.Upload do
   end
 
   # ── 섬네일 · 자막 ───────────────────────────────────────────────
+
+  @doc false
+  # 첫 댓글. 비공개(private) 영상에는 달지 않는다 — 아무도 못 보는데 할당량만 나간다.
+  # 실패해도 발행은 성공이다. 섬네일·자막과 같은 취급이다.
+  def maybe_comment(_token, _video_id, %{privacy: "private"}), do: %{ok: false, reason: "비공개"}
+
+  def maybe_comment(token, video_id, _publication) do
+    body = %{
+      "snippet" => %{
+        "videoId" => video_id,
+        "topLevelComment" => %{"snippet" => %{"textOriginal" => String.trim(@first_comment)}}
+      }
+    }
+
+    case Req.post(@comments_url,
+           params: [part: "snippet"],
+           headers: [{"authorization", "Bearer " <> token}],
+           json: body,
+           receive_timeout: 30_000
+         ) do
+      {:ok, %{status: status}} when status in [200, 201] -> %{ok: true}
+      {:ok, %{status: status, body: body}} -> %{ok: false, reason: "#{status}: #{describe(body)}"}
+      {:error, reason} -> %{ok: false, reason: inspect(reason)}
+    end
+  end
+
+  @doc false
+  def first_comment, do: String.trim(@first_comment)
 
   defp maybe_thumbnail(token, video_id, render) do
     case thumbnail_file(render) do

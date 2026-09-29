@@ -464,7 +464,8 @@ defmodule VideoTool.Publishing do
            steps: %{
              upload: "ok",
              thumbnail: step(result.thumbnail),
-             captions: step(result.captions)
+             captions: step(result.captions),
+             comment: step(result.comment)
            }
          }}
 
