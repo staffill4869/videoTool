@@ -347,6 +347,17 @@ defmodule VideoTool.MCP do
       tool("work_summary", "대기 중인 일이 몇 건인지, 시리즈가 몇 개 도는지", %{}),
       tool("list_series", "반복 제작 설정 목록", %{}),
       tool(
+        "list_grants",
+        "기업마당 지원사업 공고 목록. **영상 주제를 여기서 고를 수 있다** — " <>
+          "고른 뒤 run_series(topic:) 나 create_project 의 주제로 넣는다. " <>
+          "금액·자격은 요약에 없는 게 많으니 attachment(첨부 공고문)를 확인하고 " <>
+          "save_allowed_facts 에 넣어라 — 요약만 보고 숫자를 쓰면 지어낸 값이 나간다",
+        %{
+          "limit" => int("받을 건수 (기본 20)"),
+          "query" => str("제목·요약·기관·해시태그에 이 말이 든 것만 (예: 수출, 청년, 제조)")
+        }
+      ),
+      tool(
         "run_series",
         "시리즈로 프로젝트를 지금 하나 만든다 (간격을 기다리지 않고)",
         %{
@@ -807,6 +818,27 @@ defmodule VideoTool.MCP do
 
 
   defp handle("work_summary", _args), do: Map.merge(%{ok: true}, Work.summary())
+
+  defp handle("list_grants", args) do
+    opts =
+      [limit: args["limit"] || 20]
+      |> then(fn o -> if args["query"], do: [{:query, args["query"]} | o], else: o end)
+
+    case VideoTool.Grants.list(opts) do
+      {:ok, rows} ->
+        %{
+          ok: true,
+          grants: rows,
+          count: length(rows),
+          note:
+            "주제로 쓸 한 건을 고르세요. 금액·기간·자격은 attachment(첨부 공고문)를 열어 " <>
+              "확인한 뒤 save_allowed_facts 에 넣으세요 — summary 에는 대부분 안 들어 있습니다."
+        }
+
+      {:error, reason} ->
+        %{ok: false, error: inspect_error(reason)}
+    end
+  end
 
   defp handle("list_series", _args) do
     series =

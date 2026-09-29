@@ -199,6 +199,10 @@ end
 # 힉스필드 키는 없다 — 나레이션은 에이전트가 힉스필드 MCP 로 만들어 넘겨준다.
 #
 # 없으면 해당 기능만 꺼진다 — 앱은 그대로 돈다.
+# 기업마당 지원사업 공고 (`VideoTool.Grants`). 공고를 영상 주제로 쓸 때만 필요하다.
+# 받는 곳: bizinfo.go.kr → 마이페이지 → API 인증키 발급 (무료)
+config :video_tool, :bizinfo_api_key, System.get_env("BIZINFO_API_KEY")
+
 config :video_tool,
   google_api_key: System.get_env("GOOGLE_API_KEY"),
   google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
