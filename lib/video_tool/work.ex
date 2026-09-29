@@ -94,7 +94,8 @@ defmodule VideoTool.Work do
       title: project.title,
       topic: project.topic,
       target_sec: project.target_sec,
-      target_chars: round(project.target_sec * project.voice.chars_per_sec),
+      # **대본 길이는 목표가 아니라 영상 길이에 맞춘다.** 실제 영상은 장면 수 × 8초다.
+      target_chars: round(video_sec(project) * project.voice.chars_per_sec),
       chars_per_sec: project.voice.chars_per_sec,
       voice: project.voice.display_name,
       style: project.style.name,
@@ -107,7 +108,7 @@ defmodule VideoTool.Work do
       clip_total_sec: clip_total_sec(project, task),
       source: source_material(project, task),
       standing_prompt: standing_prompt(project),
-      instruction: instruction(task)
+      instruction: instruction(task, project)
     }
   end
 
@@ -161,7 +162,31 @@ defmodule VideoTool.Work do
 
   # 마지막 장면을 요약으로 닫으면 사람들이 "그렇구나" 하고 나간다.
   # 질문으로 끝내면 댓글에 자기 경험과 판단을 쓴다 — 그게 노출로 돌아온다.
-  defp instruction("write_script"),
+  # Flow 클립은 무조건 8초다. 그래서 **영상 길이는 장면 수가 정한다** — 목표 초는 참고값이다.
+  #
+  # **7개를 넘기지 않는다.** 예전에는 "장면 8개" 가 지시에 박혀 있어서 어떤 편이든
+  # 64초가 나왔다. 쇼츠에서 1분을 넘으면 넘긴 만큼이 아니라 편 전체가 손해다.
+  # 7개 × 8초 = 56초로, 앞뒤 여유를 두고 1분 안에 들어온다.
+  @clip_sec 8
+  @max_scenes 7
+  @min_scenes 3
+
+  @doc false
+  # 시험용 입구. 장면 수 계산만 떼어 본다.
+  def scene_count_for(target_sec) do
+    (target_sec / @clip_sec) |> round() |> min(@max_scenes) |> max(@min_scenes)
+  end
+
+  defp scene_count(project) do
+    (project.target_sec / @clip_sec)
+    |> round()
+    |> min(@max_scenes)
+    |> max(@min_scenes)
+  end
+
+  defp video_sec(project), do: scene_count(project) * @clip_sec
+
+  defp instruction("write_script", _project),
     do:
       "대본을 써서 save_script(project_id, raw_text) 로 저장하세요. " <>
         "한 장면은 클립 길이(8초)에 맞춰 공백 제외 38~42자로 씁니다 " <>
@@ -176,27 +201,29 @@ defmodule VideoTool.Work do
         "- 예·아니오로 끝나지 않게, 의견이 갈리는 지점을 물을 것 " <>
         "(\"어느 쪽이…\", \"당신이라면…\", \"이건 왜…\")
 " <>
-        "- 구독·좋아요·댓글 요청 문구는 넣지 말 것. 질문 자체가 초대다
+        "- **질문 뒤에 짧은 유도 한 마디를 붙일 것.** 열두 자를 넘기지 않는다 " <>
+        "(예: \"구독 눌러 주세요\", \"구독하면 안 놓칩니다\"). 길게 쓰면 질문이 밀려 잘린다
 " <>
         "- 마지막 장면도 8초짜리다. 짧은 마무리 한 마디 + 질문으로 38~42자를 채울 것
 " <>
-        "  예) \"직선은 시간을 아끼려는 계산이었습니다. 지금 우리가 쓰는 길은 " <>
-        "무엇을 아끼려고 그렇게 놓였을까요?\"" <> @proofread
+        "  예) \"지금 우리가 쓰는 길은 무엇을 아끼려고 놓였을까요? 구독 눌러 주세요.\"" <>
+        @proofread
 
-  defp instruction("split_scenes"),
+  defp instruction("split_scenes", project),
     do:
       "대본을 장면으로 나눠 save_scenes(project_id, scenes) 로 저장하세요. " <>
-        "장면 8개, 각 target_sec 은 8입니다 — Flow 클립이 8초로 나옵니다. " <>
+        "장면 #{scene_count(project)}개, 각 target_sec 은 8입니다 — Flow 클립이 8초로 나옵니다 " <>
+        "(영상 #{video_sec(project)}초). " <>
         "shot_prompt · info_instruction · camera_plan · expected_labels 를 채우세요. " <>
         "마지막 장면(purpose: close)의 segment_text 는 질문으로 끝나야 합니다." <> @proofread
 
-  defp instruction("translate_script"),
+  defp instruction("translate_script", _project),
     do:
       "원본 대본을 이 언어로 옮겨 save_script(project_id, raw_text) 로 저장하세요. " <>
         "새로 쓰지 마세요 — 같은 영상의 다른 언어판입니다. 화면(CLEAN)은 원본과 같은 그림을 씁니다. " <>
         "estimate_length 로 길이를 확인하세요. 언어마다 글자 수가 달라 길이가 어긋납니다."
 
-  defp instruction("translate_scenes"),
+  defp instruction("translate_scenes", _project),
     do:
       "원본의 장면 구성을 그대로 두고 info_instruction 과 expected_labels 만 이 언어로 옮겨 " <>
         "save_scenes 로 저장하세요. shot_prompt·camera_plan·target_sec 은 원본과 같아야 합니다."
@@ -204,7 +231,7 @@ defmodule VideoTool.Work do
   # **TTS 를 먼저 만들지 않는다.** 영상이 이미 나와 있으므로 그 길이가 곧 정답이다.
   # 대본 60초 목표로 썼는데 클립이 8초씩 나와 120초가 된 적이 있다 — 뒤 53초가 무음이었다.
   # 길이를 아는 지금 대본을 그 길이에 맞춰 다시 쓰고, 그 다음에 음성을 만든다.
-  defp instruction("make_narration"),
+  defp instruction("make_narration", _project),
     do:
       "**먼저 대본 길이를 영상에 맞추세요.** clip_total_sec 이 이번 영상의 실제 길이입니다. " <>
         "지금 대본이 그보다 짧으면 save_script 로 내용을 더 써서 길이를 맞춘 뒤에 음성을 만드세요 " <>
@@ -214,7 +241,7 @@ defmodule VideoTool.Work do
         "낭독 속도를 올려 길이를 맞추지 마세요 — 글자 수로 맞춥니다. " <>
         "저장이 끝나면 서버가 합성까지 이어서 합니다." <> @proofread
 
-  defp instruction("write_allowed_facts"),
+  defp instruction("write_allowed_facts", _project),
     do:
       "화면에 넣어도 되는 수치·명칭을 save_allowed_facts(project_id, facts) 로 저장하세요. " <>
         "이게 없으면 INFO 단계에서 대본에 없는 숫자가 렌더링됩니다."

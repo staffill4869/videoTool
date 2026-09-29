@@ -330,15 +330,64 @@ defmodule VideoTool.Assembly do
     |> Enum.map(fn {row, i} -> Map.put(row, :index, i) end)
   end
 
+  # 자막 한 줄의 최대 글자 수. 세로 1080 폭에 84pt 면 한 줄에 열두 자쯤 들어가므로
+  # 이 값이면 두 줄을 넘지 않는다. 더 키우면 세 줄이 되어 화면을 덮는다.
+  @sub_max_chars 18
+
   defp split_lines(text, from, to) do
     sentences =
       text
       |> String.split(~r/(?<=[.!?])\s+/u, trim: true)
       |> Enum.reject(&(String.trim(&1) == ""))
+      |> Enum.flat_map(&chunk/1)
 
     case sentences do
       [] -> []
       list -> allocate(list, from, to)
+    end
+  end
+
+  @doc false
+  # 긴 문장을 쉼표·띄어쓰기에서 잘라 짧은 토막으로 만든다.
+  #
+  # 예전에는 문장 부호에서만 끊었다. 한 장면이 8초인데 문장이 둘이면 한 줄이 4초씩
+  # 떠 있어서, 읽고 나서도 한참 남는다. 짧게 끊어 넘겨야 눈이 따라간다.
+  # **쉼표를 먼저 본다** — 말이 실제로 쉬는 자리라 여기서 끊으면 어색하지 않다.
+  def chunk(sentence) do
+    text = String.trim(sentence)
+
+    if String.length(text) <= @sub_max_chars do
+      [text]
+    else
+      case break_at(text) do
+        nil -> [text]
+        i -> [String.slice(text, 0, i) |> String.trim()] ++ chunk(String.slice(text, i..-1//1))
+      end
+    end
+  end
+
+  # 자를 자리. **가운데에 가까운 곳**을 고른다.
+  #
+  # 맨 뒤에서 자르면 남는 토막이 한 마디로 짧아진다 — "…고칠 값어치가" / "있을까요?" 처럼
+  # 뒤가 0.75초만 떠서 읽히지 않는다(2026-09-29 실측). 반씩 나누면 둘 다 읽을 시간이 생긴다.
+  # 다만 앞 토막이 @sub_max_chars 를 넘으면 줄이 세 줄이 되므로 거기서 멈춘다.
+  defp break_at(text) do
+    len = String.length(text)
+    lo = div(len, 4)
+    hi = min(@sub_max_chars, len - 1)
+    target = min(div(len, 2), @sub_max_chars)
+
+    find_mark(text, lo, hi, target, [",", "،", ";", ":"]) ||
+      find_mark(text, lo, hi, target, [" "])
+  end
+
+  defp find_mark(text, lo, hi, target, marks) do
+    lo..hi//1
+    |> Enum.filter(&(String.at(text, &1) in marks))
+    |> Enum.min_by(&abs(&1 - target), fn -> nil end)
+    |> case do
+      nil -> nil
+      i -> i + 1
     end
   end
 
@@ -967,6 +1016,13 @@ defmodule VideoTool.Assembly do
 
   # 자막 판을 화면비에 맞춘다. 1920x1080 으로 고정해 두면 9:16 영상에서 글자가
   # 가로로 눌려 나오고, 한 줄이 화면 밖으로 넘친다 — 세로는 폭이 절반도 안 된다.
+  # 자막을 화면 어디에 두는가. ASS 정렬은 숫자판 배치다 — 2 는 아래 가운데, 5 는 한가운데.
+  # 가운데로 올리면 그림을 가리므로, 그림이 아까우면 2 로 되돌린다.
+  @sub_align 5
+  # 외곽선을 두껍게. 배경이 밝은 그림체(로우폴리·플랫)에서 흰 글자가 묻히던 것을 막는다.
+  @sub_outline 4
+  @sub_shadow 0
+
   defp ass_header(font, aspect) do
     {w, h, size, margin_x, margin_v, label_size, label_v} =
       case aspect do
@@ -977,8 +1033,11 @@ defmodule VideoTool.Assembly do
         #                        두 줄이 세 줄이 되기 쉽다. 그래서 좌우 여백을 80 → 60 으로
         #                        줄여 폭을 벌고, 아래 여백도 260 → 210 으로 내렸다.
         #   위쪽 라벨(label_size) 58 → 96. 대신 **핵심 단어 하나만** 올린다(label_lines 참고)
-        "9:16" -> {1080, 1920, 68, 60, 210, 96, 170}
-        _ -> {1920, 1080, 70, 120, 90, 84, 80}
+        # 2026-09-29 요청: 자막을 키우고 **화면 가운데**로 올렸다 (Alignment 5).
+        #   자막(size) 68 → 84. 대신 한 줄을 18자로 끊는다(@sub_max_chars) — 안 그러면 세 줄이 된다.
+        #   가운데 정렬이라 MarginV 는 0 이다. 아래쪽으로 내리려면 @sub_align 을 2 로 되돌린다.
+        "9:16" -> {1080, 1920, 84, 60, 0, 96, 170}
+        _ -> {1920, 1080, 82, 120, 0, 84, 80}
       end
 
     """
@@ -994,7 +1053,7 @@ defmodule VideoTool.Assembly do
     ; Label 은 2026-09-23 요청으로 외곽선·그림자를 뺐다(Outline 0, Shadow 0)
     ; 색은 흰색(&H00FFFFFF). 우리 화면은 어두운 스튜디오라 흰 글자가 읽힌다 —
     ; 밝은 배경 그림체로 바꾸면 이 줄을 검은색(&H00000000)으로 되돌려야 한다.
-    Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,3,1,2,#{margin_x},#{margin_x},#{margin_v},1
+    Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,#{@sub_outline},#{@sub_shadow},#{@sub_align},#{margin_x},#{margin_x},#{margin_v},1
     Style: Label,#{font},#{label_size},&H00FFFFFF,&H00000000,&H00000000,1,1,0,0,8,#{margin_x},#{margin_x},#{label_v},1
 
     [Events]

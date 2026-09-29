@@ -79,7 +79,11 @@ defmodule VideoTool.WorkTest do
 
     test "목표 글자수를 함께 준다 — 없으면 60초 대본이 130초로 나온다" do
       project = make_project("길이", %{"target_sec" => 60})
-      assert describe_now(project).target_chars == 354
+
+      # 목표 60초가 아니라 **실제 영상 길이(7장면 × 8초 = 56초)** 에 맞춘다.
+      # Flow 클립이 8초로만 나오므로 목표 초는 반올림되고, 대본을 목표에 맞추면
+      # 영상보다 길거나 짧아진다. 56 × 5.9 = 330.
+      assert describe_now(project).target_chars == 330
     end
 
     test "다 끝난 프로젝트만 있으면 할 일이 없다" do
