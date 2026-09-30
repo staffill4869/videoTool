@@ -27,6 +27,9 @@ defmodule VideoTool.Publishing.Channel do
     field :max_duration_sec, :integer, default: 0
     field :is_active, :boolean, default: true
 
+    # 올린 뒤 채널 이름으로 남기는 첫 댓글. 비워 두면 upload.ex 의 기본 문구가 나간다.
+    field :first_comment, :string, default: ""
+
     # 어느 시리즈의 어느 칸인가. 시리즈마다 본채널·쇼츠 두 칸이다.
     field :series_id, :integer
     field :kind, :string, default: "main"
@@ -47,7 +50,7 @@ defmodule VideoTool.Publishing.Channel do
     |> cast(attrs, ~w(platform slug display_name account_id credential_ref token_expires_at
                       default_privacy default_category default_language title_pattern
                       description_pattern default_hashtags aspect_required max_duration_sec
-                      is_active series_id kind)a)
+                      is_active series_id kind first_comment)a)
     |> validate_inclusion(:kind, @kinds)
     |> validate_required([:platform, :slug, :display_name])
     |> validate_inclusion(:platform, @platforms)

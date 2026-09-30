@@ -36,4 +36,33 @@ defmodule VideoTool.AssemblyTest do
     assert Assembly.audio_filter(true, false) =~ "amix=inputs=2"
     assert Assembly.audio_filter(false, false) =~ "amix=inputs=1"
   end
+
+  # 같은 편을 두 번 합성하지 않는다. pipeline.ex 가 "다음 할 일" 을 물을 때마다
+  # 합성을 시작해서, 118 편 하나에 ffmpeg 8개가 붙고 서버 load 가 95 까지 갔다.
+  test "합성은 한 프로젝트에 하나만 — 두 번째 호출은 기다리지 않고 거절한다" do
+    me = self()
+
+    first =
+      Task.async(fn ->
+        Assembly.with_lock(777, fn ->
+          send(me, :locked)
+          receive do: (:release -> :ok)
+          :first_done
+        end)
+      end)
+
+    assert_receive :locked, 1_000
+
+    assert {:error, msg} = Assembly.with_lock(777, fn -> :should_not_run end)
+    assert msg =~ "이미 합성 중"
+
+    # 다른 편은 막히지 않는다.
+    assert :other = Assembly.with_lock(778, fn -> :other end)
+
+    send(first.pid, :release)
+    assert :first_done = Task.await(first)
+
+    # 끝나면 다시 잡힌다.
+    assert :again = Assembly.with_lock(777, fn -> :again end)
+  end
 end

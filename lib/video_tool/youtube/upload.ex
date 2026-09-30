@@ -49,7 +49,7 @@ defmodule VideoTool.YouTube.Upload do
          url: "https://youtu.be/#{video_id}",
          thumbnail: maybe_thumbnail(token, video_id, render),
          captions: maybe_captions(token, video_id, publication, project),
-         comment: maybe_comment(token, video_id, publication),
+         comment: maybe_comment(token, video_id, publication, channel),
          like: maybe_like(token, video_id, publication)
        }}
     end
@@ -169,13 +169,16 @@ defmodule VideoTool.YouTube.Upload do
   @doc false
   # 첫 댓글. 비공개(private) 영상에는 달지 않는다 — 아무도 못 보는데 할당량만 나간다.
   # 실패해도 발행은 성공이다. 섬네일·자막과 같은 취급이다.
-  def maybe_comment(_token, _video_id, %{privacy: "private"}), do: %{ok: false, reason: "비공개"}
+  def maybe_comment(token, video_id, publication, channel \\ nil)
 
-  def maybe_comment(token, video_id, _publication) do
+  def maybe_comment(_token, _video_id, %{privacy: "private"}, _channel),
+    do: %{ok: false, reason: "비공개"}
+
+  def maybe_comment(token, video_id, _publication, channel) do
     body = %{
       "snippet" => %{
         "videoId" => video_id,
-        "topLevelComment" => %{"snippet" => %{"textOriginal" => String.trim(@first_comment)}}
+        "topLevelComment" => %{"snippet" => %{"textOriginal" => first_comment(channel)}}
       }
     }
 
@@ -191,8 +194,26 @@ defmodule VideoTool.YouTube.Upload do
     end
   end
 
-  @doc false
-  def first_comment, do: String.trim(@first_comment)
+  @doc """
+  이 채널이 올린 뒤 남길 첫 댓글.
+
+  채널에 `first_comment` 가 적혀 있으면 그걸 쓰고, 비어 있으면 기본 문구를 쓴다.
+  채널마다 하고 싶은 말이 다르다 — 영양제는 프로필을 눌러 보라고 하고 싶고,
+  지원사업은 그럴 이유가 없다.
+
+  **유튜브 API 로는 댓글을 고정할 수 없다.** 고정은 화면에서 손으로 해야 한다
+  (댓글 ⋮ → 고정). 다만 채널 주인이 쓴 댓글은 목록 위쪽에 따로 표시된다.
+  """
+  def first_comment(channel \\ nil)
+
+  def first_comment(%{first_comment: text}) when is_binary(text) do
+    case String.trim(text) do
+      "" -> String.trim(@first_comment)
+      trimmed -> trimmed
+    end
+  end
+
+  def first_comment(_), do: String.trim(@first_comment)
 
   defp maybe_thumbnail(token, video_id, render) do
     case thumbnail_file(render) do

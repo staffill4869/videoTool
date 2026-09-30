@@ -10,6 +10,16 @@ defmodule VideoTool.FirstCommentTest do
              Upload.maybe_comment("token", "vid", %{privacy: "private"})
   end
 
+  # 채널마다 하고 싶은 말이 다르다. 영양제는 프로필을 눌러 보라고 하고,
+  # 지원사업은 그럴 이유가 없다. 비워 두면 기본 문구로 떨어진다.
+  test "채널에 첫 댓글이 적혀 있으면 그걸 쓴다" do
+    assert Upload.first_comment(%{first_comment: "프로필을 눌러 보세요"}) ==
+             "프로필을 눌러 보세요"
+
+    assert Upload.first_comment(%{first_comment: "   "}) == Upload.first_comment()
+    assert Upload.first_comment(%{first_comment: ""}) == Upload.first_comment()
+  end
+
   test "첫 댓글에 구독과 좋아요가 들어 있다" do
     text = Upload.first_comment()
     assert text =~ "구독"

@@ -459,6 +459,35 @@ defmodule VideoTool.Assembly do
   다른 언어판이 그걸 다시 쓴다.
   """
   def assemble(project, opts \\ []) do
+    with_lock(project.id, fn -> do_assemble(project, opts) end)
+  end
+
+  # **한 프로젝트에 합성은 하나만.** pipeline.ex 의 post_production 은 완성본이 없으면
+  # 합성을 시작하는데, 그게 "다음 할 일이 뭐냐" 를 물을 때마다 불린다. 합성은 20분 걸리고
+  # 에이전트는 몇 분마다 물어보니 물어볼 때마다 한 개씩 쌓였다 —
+  # 실측(09-30): 118 편 하나에 ffmpeg 8개가 붙어 같은 clip_05.mp4 를 셋이 동시에 썼다.
+  # 서버 load 가 95 까지 올라가고 스왑이 꽉 차서 sshd 조차 못 뜨는 상태가 됐다.
+  #
+  # 기다리지 않고 바로 돌려보낸다 (Retries: 0). 두 번째 호출자가 기다려 봐야
+  # 첫 번째가 만든 결과를 쓰면 되고, 기다리는 동안 프로세스만 붙잡고 있게 된다.
+  @doc false
+  def with_lock(project_id, fun) do
+    lock = {{:assemble, project_id}, self()}
+
+    case :global.set_lock(lock, [node()], 0) do
+      true ->
+        try do
+          fun.()
+        after
+          :global.del_lock(lock, [node()])
+        end
+
+      false ->
+        {:error, "이미 합성 중입니다. 끝날 때까지 기다리세요."}
+    end
+  end
+
+  defp do_assemble(project, opts) do
     dir = work_dir(project)
     File.mkdir_p!(Path.join(dir, "work"))
 
