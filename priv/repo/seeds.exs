@@ -52,6 +52,11 @@ upsert.(StylePreset, [slug: "iso-lowpoly"], %{
   Isometric low-poly diorama. Flat matte materials, no texture noise, crisp edges.
   Soft ambient occlusion, single warm key light at 45 degrees. Pastel-muted palette.
   Every scene is a self-contained diorama on a neutral base plate.
+
+  **화면을 꽉 채운다.** 디오라마를 가운데 작게 놓고 주위를 비우지 마라 —
+  세로 화면에서 그러면 빈 배경이 절반을 먹고 싸구려로 보인다(2026-09-30 실측).
+  받침판의 가장자리가 화면 좌우 끝에 닿게, 위아래로도 프레임을 채우게 잡는다.
+  글자 자리를 비워 둘 필요가 없다 — 자막과 라벨은 합성 단계에서 위에 겹쳐 굽는다.
   """,
   clean_rules: """
   모든 장면은 다음 기준을 지킨다.

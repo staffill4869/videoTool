@@ -219,10 +219,45 @@ defmodule VideoTool.Assembly do
     File.mkdir_p!(dir)
     dest = Path.join(dir, "narration#{ext(src)}")
 
-    cond do
-      String.starts_with?(src, "http") -> download(src, dest)
-      File.exists?(src) -> copy(src, dest)
-      true -> {:error, "음성 파일을 찾을 수 없습니다: #{src}"}
+    placed =
+      cond do
+        String.starts_with?(src, "http") -> download(src, dest)
+        File.exists?(src) -> copy(src, dest)
+        true -> {:error, "음성 파일을 찾을 수 없습니다: #{src}"}
+      end
+
+    with {:ok, path} <- placed, do: retime(path, speech_rate(project))
+  end
+
+  @doc false
+  # 낭독 속도. voices.speech_rate 가 0 이면 그대로 둔다.
+  #
+  # **길이를 맞추려고 여기를 올리지 마라** — 그건 대본으로 한다.
+  # 이 값은 "이 목소리가 원래 느리다" 를 바로잡는 자리다 (Ainsley 는 늘어진다).
+  # 음높이는 안 변한다. 1.15 를 넘기면 급하게 읽는 티가 난다.
+  def speech_rate(project) do
+    rate = (project.voice && project.voice.speech_rate) || 0.0
+    if rate > 0.0, do: min(max(rate, 0.8), 1.5), else: 0.0
+  end
+
+  defp retime(path, 0.0), do: {:ok, path}
+
+  defp retime(path, rate) do
+    out = Path.rootname(path) <> "_rate" <> Path.extname(path)
+
+    case Ffmpeg.exec(["-v", "error", "-y", "-i", path, "-filter:a", "atempo=#{f(rate)}", out]) do
+      {:ok, _} ->
+        if File.exists?(out) do
+          File.rm(path)
+          File.rename!(out, path)
+          {:ok, path}
+        else
+          {:ok, path}
+        end
+
+      # 속도 조절이 실패해도 원본으로 간다. 무음보다는 느린 게 낫다.
+      {:error, _} ->
+        {:ok, path}
     end
   end
 
@@ -1033,6 +1068,8 @@ defmodule VideoTool.Assembly do
   # 외곽선을 두껍게. 배경이 밝은 그림체(로우폴리·플랫)에서 흰 글자가 묻히던 것을 막는다.
   @sub_outline 4
   @sub_shadow 0
+  # 위쪽 라벨은 96pt 라 자막보다 두껍게 잡아야 같은 굵기로 보인다.
+  @label_outline 8
 
   defp ass_header(font, aspect) do
     {w, h, size, margin_x, margin_v, label_size, label_v} =
@@ -1061,11 +1098,13 @@ defmodule VideoTool.Assembly do
 
     [V4+ Styles]
     Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-    ; Label 은 2026-09-23 요청으로 외곽선·그림자를 뺐다(Outline 0, Shadow 0)
+    ; **Label 에 외곽선을 되돌렸다** (2026-09-30). 2026-09-23 에는 배경이 늘 단색이라
+    ; 외곽선 없이도 읽혔는데, 그림을 화면에 꽉 채우기로 하면서 라벨이 물체 위에 얹힌다.
+    ; 외곽선이 없으면 밝은 면에서 흰 글자가 통째로 사라진다.
     ; 색은 흰색(&H00FFFFFF). 우리 화면은 어두운 스튜디오라 흰 글자가 읽힌다 —
     ; 밝은 배경 그림체로 바꾸면 이 줄을 검은색(&H00000000)으로 되돌려야 한다.
     Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,#{@sub_outline},#{@sub_shadow},#{@sub_align},#{margin_x},#{margin_x},#{margin_v},1
-    Style: Label,#{font},#{label_size},&H00FFFFFF,&H00000000,&H00000000,1,1,0,0,8,#{margin_x},#{margin_x},#{label_v},1
+    Style: Label,#{font},#{label_size},&H00FFFFFF,&H00000000,&H00000000,1,1,#{@label_outline},0,8,#{margin_x},#{margin_x},#{label_v},1
 
     [Events]
     Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
