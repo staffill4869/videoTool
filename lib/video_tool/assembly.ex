@@ -456,11 +456,19 @@ defmodule VideoTool.Assembly do
   # 맨 뒤에서 자르면 남는 토막이 한 마디로 짧아진다 — "…고칠 값어치가" / "있을까요?" 처럼
   # 뒤가 0.75초만 떠서 읽히지 않는다(2026-09-29 실측). 반씩 나누면 둘 다 읽을 시간이 생긴다.
   # 다만 앞 토막이 @sub_max_chars 를 넘으면 줄이 세 줄이 되므로 거기서 멈춘다.
+  # **고르게 자른다.** 예전에는 `target = min(len/2, @sub_max_chars)` 였는데,
+  # 그러면 한 조각을 상한까지 꽉 채우고 나머지를 쪼개서 길이가 들쭉날쭉해진다 —
+  # 38자 문장이 18 / 10 / 10 으로 잘렸다. 시간은 글자 수에 비례해 나누므로
+  # 앞은 2.6초 떠 있고 뒤 두 개는 1.5초씩 스쳐 간다 (실측 117번: 최소 1.10초 · 최대 3.33초).
+  #
+  # 몇 조각이 필요한지 먼저 세고 그 수로 나눈 자리를 노린다. 38자면 3조각, 13자씩이다.
+  # 상한(hi)은 그대로 지킨다 — 한 줄에 열두 자쯤 들어가므로 그 위로 가면 세 줄이 된다.
   defp break_at(text) do
     len = String.length(text)
     lo = div(len, 4)
     hi = min(@sub_max_chars, len - 1)
-    target = min(div(len, 2), @sub_max_chars)
+    pieces = max(ceil(len / @sub_max_chars), 2)
+    target = min(round(len / pieces), @sub_max_chars)
 
     find_mark(text, lo, hi, target, [",", "،", ";", ":"]) ||
       find_mark(text, lo, hi, target, [" "])

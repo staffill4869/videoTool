@@ -809,7 +809,13 @@ defmodule VideoTool.MCP do
         scenes = length(Projects.scenes(p.id))
         done = (counts["clean"] || 0) + (counts["info"] || 0) + (counts["clip"] || 0)
         # 한 번도 안 나간 시리즈가 제일 급하다.
-        starved = starved_hours(last_pub[p.series_id], now)
+        #
+        # **시리즈가 없는 편은 맨 뒤로 보낸다.** `starved_hours(nil, _)` 는 9,999 를
+        # 돌려주는데, 시리즈가 없으면 `last_pub[nil]` 도 nil 이라 그 값이 걸린다 —
+        # 옛 실험 프로젝트 8개가 "제일 굶은 것" 으로 대기열 맨 위를 차지했고,
+        # 그 뒤에 만든 지원사업 편이 영영 차례를 못 받았다 (실측 2026-09-30).
+        # 시리즈에 속하지 않은 편은 반복 제작의 대상이 아니다.
+        starved = if p.series_id, do: starved_hours(last_pub[p.series_id], now), else: -1
 
         %{
           id: p.id,

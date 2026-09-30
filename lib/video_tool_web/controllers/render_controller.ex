@@ -35,6 +35,17 @@ defmodule VideoToolWeb.RenderController do
     end
   end
 
+  # variant=thumb 면 유튜브에 올라가는 섬네일 그림을 준다.
+  # 화면에서 "무엇이 걸릴지" 를 보려면 영상이 아니라 이 파일을 봐야 한다 —
+  # 2026-09-30 에 898x786 짜리 연락지 격자가 섬네일로 18편 올라간 걸
+  # 유튜브 채널을 눈으로 보고서야 알았다.
+  defp pick_file(render, "thumb") do
+    case render.thumbnail_path do
+      p when is_binary(p) and p != "" -> exists(p)
+      _ -> {:error, "섬네일이 붙어 있지 않습니다"}
+    end
+  end
+
   defp pick_file(render, _), do: exists(render.file_path)
 
   defp exists(path), do: if(File.exists?(path), do: {:ok, path}, else: {:error, "파일이 없습니다"})
@@ -103,6 +114,9 @@ defmodule VideoToolWeb.RenderController do
       ".mov" -> "video/quicktime"
       ".wav" -> "audio/wav"
       ".mp3" -> "audio/mpeg"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".png" -> "image/png"
       _ -> "application/octet-stream"
     end
   end

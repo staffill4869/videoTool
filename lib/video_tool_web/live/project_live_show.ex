@@ -34,9 +34,43 @@ defmodule VideoToolWeb.ProjectLive.Show do
       languages: Projects.language_names(),
       voices: VideoTool.Presets.list_voices(),
       renders: Media.renders(project.id),
-      narration: Media.latest_narration(project.id)
+      narration: Media.latest_narration(project.id),
+      thumbnail: thumbnail_info(project)
     )
     |> load_prompt()
+  end
+
+  # 유튜브에 실제로 걸리는 그림과 그 크기를 화면에 내준다.
+  # 크기를 같이 보여 주는 이유: `thumb.jpg` 라는 이름만 맞고 내용이 연락지 격자인
+  # 파일이 18편에 올라가 있었다. 1280x720 이 아니면 그 자리에서 빨갛게 보여야 한다.
+  defp thumbnail_info(project) do
+    renders = Media.renders(project.id)
+
+    render =
+      Enum.find(renders, &(is_binary(&1.thumbnail_path) and &1.thumbnail_path != "" and
+                             File.exists?(&1.thumbnail_path)))
+
+    if render do
+      {w, h} =
+        case VideoTool.Ffmpeg.probe(render.thumbnail_path) do
+          {:ok, %{width: w, height: h}} -> {w, h}
+          _ -> {0, 0}
+        end
+
+      published =
+        VideoTool.Publishing.publications(project.id)
+        |> Enum.count(& &1.thumbnail_uploaded)
+
+      %{
+        render_id: render.id,
+        path: render.thumbnail_path,
+        width: w,
+        height: h,
+        ok?: h > 0 and abs(w / h - 16 / 9) < 0.1,
+        published: published,
+        uploaded: if(published > 0, do: "유튜브에 올라감", else: "아직 유튜브에 안 올라감")
+      }
+    end
   end
 
   defp load_prompt(socket) do
@@ -188,6 +222,40 @@ defmodule VideoToolWeb.ProjectLive.Show do
           나레이션 {round(@narration.duration_sec)}초
         </span>
       </div>
+
+      <%!-- 유튜브에 실제로 걸리는 그림. 영상만 보고 있으면 여기에 무엇이 올라갔는지 모른다 —
+            2026-09-30 에 898x786 짜리 연락지 격자가 18편에 섬네일로 올라간 걸
+            유튜브 채널 화면을 눈으로 보고서야 알았다. --%>
+      <section class="mt-6">
+        <h2 class="mb-2 font-semibold">썸네일</h2>
+
+        <p :if={@thumbnail == nil} class="text-sm opacity-60">
+          아직 없습니다. make_thumbnail(project_id, line1, line2) 로 만듭니다.
+          <span class="opacity-70">없으면 유튜브가 영상 중간 프레임을 멋대로 골라 씁니다.</span>
+        </p>
+
+        <div :if={@thumbnail} class="flex flex-wrap items-start gap-4">
+          <img
+            src={~p"/renders/#{@thumbnail.render_id}/play?variant=thumb"}
+            alt="썸네일"
+            class="max-h-64 w-auto rounded border border-base-300 bg-base-200"
+          />
+          <div class="text-xs opacity-70">
+            <div class="flex items-center gap-2">
+              <span class={["badge badge-sm", @thumbnail.ok? || "badge-error"]}>
+                {@thumbnail.width}×{@thumbnail.height}
+              </span>
+              <span :if={!@thumbnail.ok?} class="text-error">
+                가로 16:9 가 아닙니다 — 이건 썸네일이 아니라 다른 그림입니다
+              </span>
+            </div>
+            <div class="mt-1">{@thumbnail.path}</div>
+            <div class="mt-1">
+              {@thumbnail.uploaded} · 올라간 편 {@thumbnail.published}개
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="mt-6">
         <h2 class="mb-2 font-semibold">완성본</h2>

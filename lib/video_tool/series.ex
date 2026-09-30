@@ -144,9 +144,13 @@ defmodule VideoTool.Series do
       from p in Project,
         join: pub in "publications",
         on: pub.project_id == p.id and pub.status == "published",
-        where: not is_nil(p.series_id),
+        where: not is_nil(p.series_id) and not is_nil(pub.published_at),
         group_by: p.series_id,
-        select: {p.series_id, max(pub.updated_at)}
+        # **updated_at 을 쓰지 마라.** 발행과 상관없는 갱신에도 시각이 바뀐다 —
+        # 섬네일을 나중에 올리기만 해도 그 행이 "방금 발행" 으로 보여서
+        # 오래 못 나간 시리즈를 앞에 두는 순번이 통째로 무너진다
+        # (실측 2026-09-30: 섬네일 백필 뒤 지원사업이 3시간 밀렸는데 0시간으로 나왔다).
+        select: {p.series_id, max(pub.published_at)}
     )
     |> Map.new()
   end

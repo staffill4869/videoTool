@@ -261,7 +261,23 @@ defmodule VideoTool.YouTube.Upload do
     registered = if render.thumbnail_path != "", do: render.thumbnail_path
 
     [registered | Path.wildcard("projects/#{render.project_id}/{thumb,thumbnail}.{jpg,jpeg,png}")]
-    |> Enum.find(&(is_binary(&1) and File.exists?(&1)))
+    |> Enum.filter(&(is_binary(&1) and File.exists?(&1)))
+    |> Enum.find(&landscape?/1)
+  end
+
+  # **가로 16:9 만 섬네일로 올린다.**
+  #
+  # 예전에는 `thumb.jpg` 라는 이름만 보고 올렸다. 그 파일에 무엇이 들었는지는 안 봤다.
+  # 실측(2026-09-30): 발행된 23편 중 18편의 `thumb.jpg` 가 898x786 짜리 **연락지 격자**
+  # 였고(에이전트가 화면을 갈무리해 save_thumbnail 로 넣은 것), 그게 그대로 유튜브에
+  # 올라가 있었다. 채널에 장면 격자가 섬네일로 걸린 채 몇 편이 나갔다.
+  #
+  # `Thumbnail.compose` 는 1280x720 으로만 만든다. 그 비율이 아니면 섬네일이 아니다.
+  defp landscape?(path) do
+    case VideoTool.Ffmpeg.probe(path) do
+      {:ok, %{width: w, height: h}} when w > 0 and h > 0 -> abs(w / h - 16 / 9) < 0.1
+      _ -> false
+    end
   end
 
   defp image_type(path) do

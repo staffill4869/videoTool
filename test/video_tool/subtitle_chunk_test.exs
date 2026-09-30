@@ -50,4 +50,21 @@ defmodule VideoTool.SubtitleChunkTest do
     refute Enum.any?(parts, &String.starts_with?(&1, "500")),
            "천 단위 쉼표에서 잘렸다: #{inspect(parts)}"
   end
+
+  # 상한까지 꽉 채우고 나머지를 쪼개면 길이가 들쭉날쭉해진다.
+  # 실측(117번): 38자 문장이 18 / 10 / 10 으로 잘려 1.10초짜리 자막이 스쳐 갔다.
+  test "조각을 고르게 자른다 — 한 조각만 길고 나머지가 짧으면 안 된다" do
+    text = "체중이 훌쩍 늘면 근육이 커진 걸로 오해하기 쉽지만 사실은 물이 먼저 자리 잡은 것입니다"
+    parts = Assembly.chunk(text)
+
+    lens = Enum.map(parts, &String.length/1)
+    assert Enum.all?(lens, &(&1 <= 18)), "상한을 넘는 조각: #{inspect(lens)}"
+
+    # 가장 긴 조각이 가장 짧은 조각의 두 배를 넘지 않는다.
+    assert Enum.max(lens) <= Enum.min(lens) * 2, "고르지 않다: #{inspect(lens)}"
+
+    # 자른 것을 도로 붙이면 원문이다 (공백 차이는 무시).
+    assert parts |> Enum.join(" ") |> String.replace(~r/\s+/, "") ==
+             String.replace(text, ~r/\s+/, "")
+  end
 end
