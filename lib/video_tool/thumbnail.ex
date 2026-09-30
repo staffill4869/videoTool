@@ -88,6 +88,96 @@ defmodule VideoTool.Thumbnail do
     end
   end
 
+  @doc """
+  본편 그림으로 섬네일을 **직접 만든다.** 1번 장면의 INFO 이미지 위에
+  검은 띠를 깔고 큰 글자 두 줄을 얹는다.
+
+  따로 그리지 않는 이유: 그리면 편당 비용이 들고 그림체가 본편과 어긋난다.
+  이미 만든 그림을 쓰면 값이 0 이고 화풍이 100% 같다.
+
+  띠를 까는 이유: 그림 위에 바로 글자를 얹으면 배경색과 붙어 안 읽힌다.
+  로우폴리·플랫 화풍은 배경이 밝아서 흰 글자가 특히 묻힌다.
+
+  **글자는 ASS 로 굽는다.** 서버 ffmpeg 빌드에 drawtext 가 없다 —
+  자막을 굽는 것과 같은 경로라 한글이 안 깨진다.
+  """
+  def compose(project, line1, line2 \\ "", opts \\ []) do
+    band = Keyword.get(opts, :band, 560)
+    out = Path.join(work_dir(project), "thumb.jpg")
+
+    with {:ok, src} <- hero_image(project) do
+      ass = write_ass(project, line1, line2)
+      pic_h = 1920 - band
+
+      args = [
+        "-v", "error", "-y", "-i", src,
+        "-vf",
+        "scale=1080:#{pic_h}:force_original_aspect_ratio=increase,crop=1080:#{pic_h}," <>
+          "pad=1080:1920:0:#{band}:black,subtitles=#{Path.basename(ass)}",
+        "-frames:v", "1", "-pix_fmt", "yuvj420p", "-q:v", "2", out
+      ]
+
+      case System.cmd("ffmpeg", args, cd: Path.dirname(ass), stderr_to_stdout: true) do
+        {_, 0} -> if File.exists?(out), do: {:ok, out}, else: {:error, "섬네일 파일이 없습니다"}
+        {log, _} -> {:error, "섬네일 합성 실패: #{String.slice(log, 0, 200)}"}
+      end
+    end
+  end
+
+  # 1번 장면의 INFO. 없으면 CLEAN. 훅 장면이라 이 편이 무슨 이야기인지 한눈에 보인다.
+  defp hero_image(project) do
+    scene = project.id |> Projects.scenes() |> List.first()
+
+    if is_nil(scene) do
+      {:error, "장면이 없습니다"}
+    else
+      ["info", "clean"]
+      |> Enum.flat_map(&Media.list_assets(project.id, &1))
+      |> Enum.filter(&(&1.scene_id == scene.id and File.exists?(&1.file_path)))
+      |> List.first()
+      |> case do
+        nil -> {:error, "1번 장면 이미지가 없습니다"}
+        a -> {:ok, a.file_path}
+      end
+    end
+  end
+
+  # 흰 줄 + 노란 줄. 굵은 검은 테두리로 띠 위에서도 또렷하게.
+  defp write_ass(project, line1, line2) do
+    path = Path.join(work_dir(project), "thumb.ass")
+
+    head = """
+    [Script Info]
+    ScriptType: v4.00+
+    PlayResX: 1080
+    PlayResY: 1920
+    WrapStyle: 2
+    ScaledBorderAndShadow: yes
+
+    [V4+ Styles]
+    Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+    Style: L1,#{font()},160,&H00FFFFFF,&H00000000,&H00000000,1,1,10,0,8,25,25,60,1
+    Style: L2,#{font()},160,&H0055E7FF,&H00000000,&H00000000,1,1,10,0,8,25,25,275,1
+
+    [Events]
+    Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    Dialogue: 0,0:00:00.00,0:00:10.00,L1,,0,0,0,,#{line1}
+    """
+
+    body = if line2 in [nil, ""], do: "", else: "Dialogue: 0,0:00:00.00,0:00:10.00,L2,,0,0,0,,#{line2}
+"
+
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, head <> body)
+    path
+  end
+
+  defp font, do: VideoTool.Presets.default_subtitle_font()
+
+  defp work_dir(project) do
+    Path.join(project.output_folder || "projects", to_string(project.id))
+  end
+
   @doc "만들어진 섬네일 파일(경로 또는 URL)을 완성본에 붙인다."
   def save(project, src) do
     with {:ok, render} <- latest_render(project),

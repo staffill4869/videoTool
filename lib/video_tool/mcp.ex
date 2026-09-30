@@ -208,6 +208,18 @@ defmodule VideoTool.MCP do
         ["project_id", "file"]
       ),
       tool(
+        "make_thumbnail",
+        "본편 그림으로 섬네일을 직접 만들어 붙인다. 1번 장면 INFO 이미지 위에 검은 띠를 깔고 " <>
+          "큰 글자 두 줄을 얹는다 — 따로 그리지 않으므로 값이 0 이고 화풍이 본편과 같다. " <>
+          "line1 은 흰색(주제), line2 는 노란색(숫자)으로 나온다. 각 줄 7~9글자를 넘기지 마라",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "line1" => str("윗줄 — 흰색. 무엇에 대한 이야기인지 (예: 통근버스 임차비)"),
+          "line2" => str("아랫줄 — 노란색. 숫자나 마감 (예: 월 250만 원)")
+        },
+        ["project_id", "line1"]
+      ),
+      tool(
         "assemble",
         "클립을 장면 순서로 리타이밍해 이어 붙이고 나레이션과 자막을 얹어 완성본을 만든다",
         %{
@@ -1247,6 +1259,17 @@ defmodule VideoTool.MCP do
   defp handle("thumbnail_brief", args) do
     with {:ok, project} <- Projects.get_project(args["project_id"]) do
       %{ok: true, project_id: project.id, brief: VideoTool.Thumbnail.brief(project)}
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle("make_thumbnail", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]),
+         {:ok, file} <-
+           VideoTool.Thumbnail.compose(project, args["line1"], args["line2"] || ""),
+         {:ok, result} <- VideoTool.Thumbnail.save(project, file) do
+      result |> Map.put(:ok, true) |> Map.put(:file, file)
     else
       {:error, reason} -> %{ok: false, error: inspect_error(reason)}
     end
