@@ -308,7 +308,10 @@ defmodule VideoTool.Flow do
   """
   def harvest(project, stage, exclude, scenes \\ nil) do
     with :ok <- right_tab?(project) do
-      do_harvest(project, stage, exclude, scenes)
+      result = do_harvest(project, stage, exclude, scenes)
+      # 받은 것이 장면에 다 붙었으면 단계가 올라간다. 화면의 진행 눈금이 이 값만 본다.
+      VideoTool.Projects.sync_status(project.id)
+      result
     end
   end
 

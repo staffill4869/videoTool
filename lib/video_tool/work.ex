@@ -106,6 +106,8 @@ defmodule VideoTool.Work do
       language_label: Projects.language_label(project.language),
       variant_of_id: project.variant_of_id,
       clip_total_sec: clip_total_sec(project, task),
+      # 읽힐 글. 자막은 대본(숫자) 그대로 쓰고, 음성만 이걸 읽힌다.
+      tts_text: task == "make_narration" && script && (script.tts_text || script.raw_text),
       source: source_material(project, task),
       standing_prompt: standing_prompt(project),
       instruction: instruction(task, project)
@@ -236,6 +238,9 @@ defmodule VideoTool.Work do
       "**먼저 대본 길이를 영상에 맞추세요.** clip_total_sec 이 이번 영상의 실제 길이입니다. " <>
         "지금 대본이 그보다 짧으면 save_script 로 내용을 더 써서 길이를 맞춘 뒤에 음성을 만드세요 " <>
         "(estimate_length 로 확인). 짧은 대본으로 음성을 만들면 뒷부분이 통째로 무음이 됩니다. " <>
+        "**TTS 에는 job 의 tts_text 를 넣으세요** — 대본(raw_text)이 아닙니다. " <>
+        "대본은 자막으로 그대로 구워지므로 숫자(10월 2일)로 두고, " <>
+        "읽을 때만 소리대로(시월 이일) 바뀝니다. 대본에 소리대로 쓰면 자막이 그렇게 나갑니다. " <>
         "길이를 맞췄으면 힉스필드 MCP 로 TTS 를 만들고 그 파일 경로나 URL 을 " <>
         "save_narration(project_id, file) 에 넘기세요. " <>
         "낭독 속도를 올려 길이를 맞추지 마세요 — 글자 수로 맞춥니다. " <>

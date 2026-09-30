@@ -456,6 +456,8 @@ defmodule VideoTool.Publishing do
             error: ""
           })
 
+        {:ok, _} = VideoTool.Projects.sync_status(project.id)
+
         {:ok,
          %{
            publication_id: updated.id,

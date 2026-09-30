@@ -61,6 +61,7 @@ defmodule VideoTool.Assembly do
       with {:ok, narration} <- Media.create_narration(attrs) do
         rows = subtitle_rows(segments, timing)
         {:ok, _} = Media.replace_subtitles(narration, rows)
+        {:ok, _} = Projects.sync_status(project.id)
 
         {:ok,
          %{
@@ -474,7 +475,8 @@ defmodule VideoTool.Assembly do
         thumbnail_path: inherited_thumbnail(project.id)
       }
 
-      with {:ok, render} <- Media.create_render(attrs) do
+      with {:ok, render} <- Media.create_render(attrs),
+           {:ok, _} <- VideoTool.Projects.sync_status(project.id) do
         {:ok,
          %{
            render_id: render.id,
