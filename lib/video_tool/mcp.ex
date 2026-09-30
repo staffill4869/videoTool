@@ -114,6 +114,13 @@ defmodule VideoTool.MCP do
       tool("cost_report", "프로젝트 비용 집계", %{"project_id" => int("프로젝트 id")}, ["project_id"]),
       tool("list_channels", "발행 대상 채널과 토큰 상태", %{}),
       tool(
+        "upload_thumbnail",
+        "**이미 올라간 영상에 섬네일만 붙인다** (50유닛). 발행 뒤에 섬네일을 만들었거나 " <>
+          "발행 때 섬네일 올리기가 실패한 편을 되살릴 때 쓴다. 영상을 다시 올리지 않는다",
+        %{"publication_id" => int("발행물 id")},
+        ["publication_id"]
+      ),
+      tool(
         "save_publish_meta",
         "제목·설명·해시태그를 저장만 한다. 발행하지 않는다",
         %{
@@ -863,6 +870,13 @@ defmodule VideoTool.MCP do
   # 새 편을 만든다" 라고만 적혀 있어서 에이전트는 맨 위(id 가 작은 영양제)를 계속 집었고,
   # 지원사업은 02:19 을 끝으로 네 시간 넘게 안 나갔다 (실측 2026-09-30: #44·#45·#46 이
   # 연달아 영양제였다). 고르라고 해 놓고 **고를 근거를 안 준 게 원인**이다.
+  defp handle("upload_thumbnail", args) do
+    case Publishing.upload_thumbnail(args["publication_id"]) do
+      {:ok, result} -> Map.merge(%{ok: true}, result)
+      {:error, reason} -> %{ok: false, error: to_string(reason)}
+    end
+  end
+
   defp handle("list_series", _args) do
     last_pub = Series.last_published_by_series()
     now = DateTime.utc_now()

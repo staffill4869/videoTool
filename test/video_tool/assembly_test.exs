@@ -92,6 +92,10 @@ defmodule VideoTool.AssemblyTest do
     Enum.zip(fixed, tl(fixed))
     |> Enum.each(fn {a, b} -> assert a["end"] == b["start"] end)
 
+    # 축척을 고쳤으면 클립도 거기에 맞춰야 한다. mode 가 없으면 fit_mode 가 :clips 를
+    # 돌려주고 클립이 원본 8초 그대로 쓰여서, 자막만 줄고 영상은 안 줄어든다.
+    assert Enum.all?(fixed, &(&1["mode"] == "tight"))
+
     # 어느 장면이 긴지는 그대로다.
     assert Enum.map(stale, & &1["target_sec"]) |> Enum.with_index() |> Enum.max() |> elem(1) ==
              Enum.map(fixed, & &1["target_sec"]) |> Enum.with_index() |> Enum.max() |> elem(1)

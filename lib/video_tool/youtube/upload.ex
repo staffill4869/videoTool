@@ -215,6 +215,24 @@ defmodule VideoTool.YouTube.Upload do
 
   def first_comment(_), do: String.trim(@first_comment)
 
+  @doc """
+  **이미 올라간 영상에 섬네일만 붙인다.**
+
+  `publish` 안에서만 부르던 걸 꺼냈다. 섬네일은 발행보다 늦게 만들어지는 일이 흔한데
+  (무인 루프 지시문에 그 단계가 아예 없었다 — 2026-09-30 기준 올라간 14편에 섬네일이
+  없었다), 그때마다 영상을 다시 올릴 수는 없다. 50유닛이면 갈아 끼울 수 있다.
+
+  실패해도 발행 기록은 건드리지 않는다. 섬네일이 없다고 영상을 내릴 이유는 없다.
+  """
+  def set_thumbnail(publication, channel, render) do
+    with {:ok, token} <- GoogleOAuth.access_token(channel) do
+      case maybe_thumbnail(token, publication.external_id, render) do
+        %{ok: true} = r -> {:ok, r}
+        %{ok: false, reason: reason} -> {:error, reason}
+      end
+    end
+  end
+
   defp maybe_thumbnail(token, video_id, render) do
     case thumbnail_file(render) do
       nil ->

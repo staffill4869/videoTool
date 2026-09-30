@@ -506,6 +506,40 @@ defmodule VideoTool.Publishing do
     end
   end
 
+  @doc """
+  이미 올라간 영상에 섬네일만 올린다 (50유닛).
+
+  발행 뒤에 섬네일을 만든 편을 되살리려고 만들었다. 섬네일이 없으면 유튜브가
+  영상 중간 프레임을 멋대로 골라 쓴다.
+  """
+  def upload_thumbnail(publication_id) do
+    case Repo.get(Publication, publication_id) do
+      nil ->
+        {:error, "발행물 #{publication_id} 이 없습니다."}
+
+      pub ->
+        pub = Repo.preload(pub, [:channel, :render])
+
+        cond do
+          pub.external_id == "" ->
+            {:error, "아직 유튜브에 올라가지 않은 발행물입니다."}
+
+          is_nil(pub.render) ->
+            {:error, "완성본이 연결돼 있지 않습니다."}
+
+          true ->
+            case VideoTool.YouTube.Upload.set_thumbnail(pub, pub.channel, pub.render) do
+              {:ok, _} ->
+                {:ok, _} = mark(pub, %{thumbnail_uploaded: true})
+                {:ok, %{publication_id: pub.id, video_id: pub.external_id}}
+
+              {:error, reason} ->
+                {:error, to_string(reason)}
+            end
+        end
+    end
+  end
+
   defp mark(publication, attrs), do: publication |> Publication.changeset(attrs) |> Repo.update()
 
   defp step(%{ok: true}), do: "ok"

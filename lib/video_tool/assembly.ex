@@ -208,6 +208,12 @@ defmodule VideoTool.Assembly do
           d = Float.round((row["target_sec"] || 0.0) * k, 3)
           stop = Float.round(cursor + d, 3)
 
+          # **tight 로 표시한다.** 이걸 안 붙이면 `fit_mode` 가 :clips 를 돌려주고
+          # 클립이 원본 길이(8초) 그대로 쓰인다 — 자막만 줄고 영상은 안 줄어
+          # 어긋남이 되레 커진다 (실측 117번: 자막 54.78초인데 완성본 64.04초).
+          # 축척을 고쳤다는 것은 이 시간표가 확정이라는 뜻이니 클립을 여기에 맞춘다.
+          row = Map.put(row, "mode", "tight")
+
           {%{row | "start" => Float.round(cursor, 3), "end" => stop, "target_sec" => d}, stop}
         end)
 
