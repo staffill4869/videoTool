@@ -234,25 +234,28 @@ defmodule VideoToolWeb.ProjectLive.Show do
           <span class="opacity-70">없으면 유튜브가 영상 중간 프레임을 멋대로 골라 씁니다.</span>
         </p>
 
-        <div :if={@thumbnail} class="flex flex-wrap items-start gap-4">
+        <%!-- 크기는 인라인으로 박는다. Tailwind 빌드가 서버에서 갱신 안 되면
+              max-h-* 같은 클래스가 CSS 에 없어 그림이 화면을 통째로 먹는다. --%>
+        <div :if={@thumbnail} style="max-width: 420px">
           <img
             src={~p"/renders/#{@thumbnail.render_id}/play?variant=thumb"}
             alt="썸네일"
-            class="max-h-64 w-auto rounded border border-base-300 bg-base-200"
+            style="display:block; width:100%; height:auto; border-radius:6px"
+            class="border border-base-300 bg-base-200"
           />
-          <div class="text-xs opacity-70">
-            <div class="flex items-center gap-2">
-              <span class={["badge badge-sm", @thumbnail.ok? || "badge-error"]}>
+          <div class="mt-2 text-xs opacity-70">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class={["badge badge-sm", !@thumbnail.ok? && "badge-error"]}>
                 {@thumbnail.width}×{@thumbnail.height}
               </span>
-              <span :if={!@thumbnail.ok?} class="text-error">
-                가로 16:9 가 아닙니다 — 이건 썸네일이 아니라 다른 그림입니다
-              </span>
+              <span>{@thumbnail.uploaded}</span>
+              <span>올라간 편 {@thumbnail.published}개</span>
             </div>
-            <div class="mt-1">{@thumbnail.path}</div>
-            <div class="mt-1">
-              {@thumbnail.uploaded} · 올라간 편 {@thumbnail.published}개
-            </div>
+            <p :if={!@thumbnail.ok?} class="mt-1 text-error">
+              가로 16:9 가 아닙니다 — 이건 썸네일이 아니라 다른 그림입니다.
+              make_thumbnail 로 다시 만드세요.
+            </p>
+            <div class="mt-1 break-all opacity-50">{@thumbnail.path}</div>
           </div>
         </div>
       </section>

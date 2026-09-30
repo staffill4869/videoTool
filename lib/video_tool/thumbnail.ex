@@ -101,20 +101,33 @@ defmodule VideoTool.Thumbnail do
   **글자는 ASS 로 굽는다.** 서버 ffmpeg 빌드에 drawtext 가 없다 —
   자막을 굽는 것과 같은 경로라 한글이 안 깨진다.
   """
+  @w 1280
+  @h 720
+
   def compose(project, line1, line2 \\ "", opts \\ []) do
-    band = Keyword.get(opts, :band, 560)
+    band = Keyword.get(opts, :band, 260)
     out = Path.join(work_dir(project), "thumb.jpg")
 
     with {:ok, src} <- hero_image(project) do
-      ass = write_ass(project, line1, line2)
-      pic_h = 1920 - band
+      ass = write_ass(project, line1, line2, band)
 
+      # **띠를 덧대지 말고 그림 위에 얹는다.**
+      #
+      # 예전에는 그림을 (720 - 띠) 칸에 꽉 채우고 검은 띠를 `pad` 로 아래에 덧댔다.
+      # 9:16 원본을 1280x460 에 채우려면 세로의 20%만 남는다 —
+      # 실측: 768x1376 을 폭 1280 에 맞추면 높이가 2293 이 되고 그중 460 만 쓴다.
+      # 잔이 화면을 꽉 채우는 확대 사진이 돼 장면이 뭔지 알 수 없었다.
+      #
+      # 720 전체에 채우고 띠를 `drawbox` 로 위에 그리면 31% 가 남아 장면이 보인다.
+      # 띠가 가리는 위쪽은 대개 배경이라 잃는 것이 적다.
+      # (drawtext 는 이 빌드에 없지만 drawbox 는 폰트가 필요 없어 쓸 수 있다.)
       args = [
         "-v", "error", "-y", "-i", src,
         "-vf",
-        "scale=1080:#{pic_h}:force_original_aspect_ratio=increase,crop=1080:#{pic_h}," <>
-          "pad=1080:1920:0:#{band}:black,subtitles=#{Path.basename(ass)}",
-        "-frames:v", "1", "-pix_fmt", "yuvj420p", "-q:v", "2", out
+        "scale=#{@w}:#{@h}:force_original_aspect_ratio=increase,crop=#{@w}:#{@h}," <>
+          "drawbox=x=0:y=0:w=#{@w}:h=#{band}:color=black:t=fill," <>
+          "subtitles=#{Path.basename(ass)}",
+        "-frames:v", "1", "-pix_fmt", "yuvj420p", "-q:v", "2", Path.basename(out)
       ]
 
       case System.cmd("ffmpeg", args, cd: Path.dirname(ass), stderr_to_stdout: true) do
@@ -143,21 +156,27 @@ defmodule VideoTool.Thumbnail do
   end
 
   # 흰 줄 + 노란 줄. 굵은 검은 테두리로 띠 위에서도 또렷하게.
-  defp write_ass(project, line1, line2) do
+  defp write_ass(project, line1, line2, band) do
     path = Path.join(work_dir(project), "thumb.ass")
+
+    # 원래 값(밴드 560, 1920 높이 캔버스) 기준 비율을 유지해 가로 캔버스에 맞춰 줄인다.
+    fsize = round(band * 160 / 560)
+    outline = round(band * 10 / 560)
+    margin_l1 = round(band * 60 / 560)
+    margin_l2 = round(band * 275 / 560)
 
     head = """
     [Script Info]
     ScriptType: v4.00+
-    PlayResX: 1080
-    PlayResY: 1920
+    PlayResX: #{@w}
+    PlayResY: #{@h}
     WrapStyle: 2
     ScaledBorderAndShadow: yes
 
     [V4+ Styles]
     Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-    Style: L1,#{font()},160,&H00FFFFFF,&H00000000,&H00000000,1,1,10,0,8,25,25,60,1
-    Style: L2,#{font()},160,&H0055E7FF,&H00000000,&H00000000,1,1,10,0,8,25,25,275,1
+    Style: L1,#{font()},#{fsize},&H00FFFFFF,&H00000000,&H00000000,1,1,#{outline},0,8,25,25,#{margin_l1},1
+    Style: L2,#{font()},#{fsize},&H0055E7FF,&H00000000,&H00000000,1,1,#{outline},0,8,25,25,#{margin_l2},1
 
     [Events]
     Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -175,7 +194,8 @@ defmodule VideoTool.Thumbnail do
   defp font, do: VideoTool.Presets.default_subtitle_font()
 
   defp work_dir(project) do
-    Path.join(project.output_folder || "projects", to_string(project.id))
+    folder = if project.output_folder in [nil, ""], do: "projects", else: project.output_folder
+    Path.join(folder, to_string(project.id))
   end
 
   @doc "만들어진 섬네일 파일(경로 또는 URL)을 완성본에 붙인다."
