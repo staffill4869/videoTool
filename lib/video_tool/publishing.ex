@@ -318,12 +318,38 @@ defmodule VideoTool.Publishing do
       {under_daily_cap?(channel),
        "오늘 이 채널에 이미 #{uploaded_today(channel)}편을 올렸습니다 " <>
          "(하루 상한 #{daily_cap()}편). 내일 다시 하거나 상한을 올리세요 " <>
-         "— DAILY_PUBLISH_CAP 환경변수"}
+         "— DAILY_PUBLISH_CAP 환경변수"},
+      {thumbnail_ready?(render),
+       "섬네일이 없습니다. make_thumbnail(project_id, line1, line2) 로 먼저 만드세요 " <>
+         "— 없으면 유튜브가 영상 중간 프레임을 멋대로 골라 씁니다"}
     ]
 
     case Enum.reject(checks, fn {ok, _} -> ok end) do
       [] -> :ok
       failures -> {:error, Enum.map(failures, fn {_, msg} -> msg end)}
+    end
+  end
+
+  # **섬네일 없이는 발행하지 않는다.**
+  #
+  # 무인 루프 지시문에 섬네일 단계를 적어 뒀지만 지시는 건너뛸 수 있다 —
+  # 실제로 2026-09-30 까지 올라간 23편 중 18편에 섬네일이 없었거나
+  # 엉뚱한 그림(연락지 격자)이 올라가 있었다. 되돌리기 어려운 공개 행위이므로
+  # 여기서 막는다.
+  #
+  # 이름이 아니라 **비율**을 본다. `thumb.jpg` 라는 이름만 맞고 내용이 다른 파일이
+  # 그대로 올라간 적이 있다. compose 는 1280x720 으로만 만든다.
+  defp thumbnail_ready?(render) do
+    path =
+      if is_binary(render.thumbnail_path) and render.thumbnail_path != "",
+        do: render.thumbnail_path
+
+    with p when is_binary(p) <- path,
+         true <- File.exists?(p),
+         {:ok, %{width: w, height: h}} when w > 0 and h > 0 <- VideoTool.Ffmpeg.probe(p) do
+      abs(w / h - 16 / 9) < 0.1
+    else
+      _ -> false
     end
   end
 
