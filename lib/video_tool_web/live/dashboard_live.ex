@@ -39,22 +39,6 @@ defmodule VideoToolWeb.DashboardLive do
   # ── 이벤트 ──────────────────────────────────────────────────────
 
   @impl true
-  def handle_event("record", params, socket) do
-    attrs = %{
-      views: to_int(params["views"]),
-      likes: to_int(params["likes"]),
-      comments: to_int(params["comments"]),
-      shares: to_int(params["shares"]),
-      source: "manual",
-      note: params["note"] || ""
-    }
-
-    case Insights.record(String.to_integer(params["publication_id"]), attrs) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "기록했습니다") |> load()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "기록하지 못했습니다")}
-    end
-  end
-
   def handle_event("collect", _params, socket) do
     case Insights.collect_youtube() do
       {:ok, result} ->
@@ -89,15 +73,6 @@ defmodule VideoToolWeb.DashboardLive do
       end
     else
       {:error, reason} -> {:noreply, put_flash(socket, :error, reason)}
-    end
-  end
-
-  defp to_int(nil), do: 0
-
-  defp to_int(value) do
-    case Integer.parse(to_string(value)) do
-      {n, _} -> n
-      :error -> 0
     end
   end
 
@@ -202,44 +177,44 @@ defmodule VideoToolWeb.DashboardLive do
       </div>
 
       <div :if={@publications != []} class="mt-8">
-        <h2 class="mb-2 text-lg font-semibold">성과 입력</h2>
+        <h2 class="mb-2 text-lg font-semibold">발행물별</h2>
         <p class="mb-2 text-sm text-base-content/60">
-          초록 숫자가 <strong>마지막으로 잰 값</strong>이다. 입력 칸은 손으로 고칠 때만 쓴다 —
-          비어 있다고 집계가 없는 것이 아니다. 잴 때마다 새 줄로 쌓여서 증가 추이가 남는다.
+          「유튜브에서 수집」 을 누르면 여기가 채워진다. 잴 때마다 새 줄로 쌓여서 증가 추이가 남는다.
         </p>
 
-        <form :for={p <- @publications} phx-submit="record" class="mb-2 flex flex-wrap items-end gap-2">
-          <input type="hidden" name="publication_id" value={p.id} />
-          <div class="w-64 truncate text-sm">
-            <div class="font-medium">{p.project.title}</div>
-            <div class="font-mono text-xs opacity-60">{p.channel.slug} · {p.project.language}</div>
-            <%!-- 마지막으로 잰 값. 없으면 "아직 안 잼" 이라고 적는다 —
-                  빈칸만 있으면 집계가 안 된 것으로 읽힌다 (2026-09-30). --%>
-            <div :if={p.latest} class="mt-0.5 font-mono text-xs text-success">
-              {p.latest.views} 회 · 좋아요 {p.latest.likes} · 댓글 {p.latest.comments}
-              <span class="opacity-50">· {when_measured(p.latest.collected_at)}</span>
-            </div>
-            <div :if={is_nil(p.latest)} class="mt-0.5 text-xs opacity-40">아직 안 쟀습니다</div>
-          </div>
-          <label class="form-control">
-            <span class="label-text text-xs">조회수</span>
-            <input name="views" type="number" min="0" class="input input-bordered input-xs w-24" />
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">좋아요</span>
-            <input name="likes" type="number" min="0" class="input input-bordered input-xs w-20" />
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">댓글</span>
-            <input name="comments" type="number" min="0" class="input input-bordered input-xs w-20" />
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">공유</span>
-            <input name="shares" type="number" min="0" class="input input-bordered input-xs w-20" />
-          </label>
-          <button type="submit" class="btn btn-xs">기록</button>
-          <a :if={p.external_url != ""} href={p.external_url} target="_blank" class="link text-xs">열기</a>
-        </form>
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>영상</th>
+                <th class="text-right">조회수</th>
+                <th class="text-right">좋아요</th>
+                <th class="text-right">댓글</th>
+                <th>잰 때</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={p <- @publications}>
+                <td class="max-w-[20rem]">
+                  <div class="truncate text-sm font-medium">{p.project.title}</div>
+                  <div class="font-mono text-xs opacity-60">{p.channel.slug} · {p.project.language}</div>
+                </td>
+                <td class="text-right font-mono">{(p.latest && p.latest.views) || "—"}</td>
+                <td class="text-right font-mono">{(p.latest && p.latest.likes) || "—"}</td>
+                <td class="text-right font-mono">{(p.latest && p.latest.comments) || "—"}</td>
+                <td class="text-xs opacity-60">
+                  {(p.latest && when_measured(p.latest.collected_at)) || "아직 안 쟀습니다"}
+                </td>
+                <td>
+                  <a :if={p.external_url != ""} href={p.external_url} target="_blank" class="link text-xs">
+                    열기
+                  </a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div :if={@data.measured > 0} class="mt-8 grid gap-6 lg:grid-cols-3">
