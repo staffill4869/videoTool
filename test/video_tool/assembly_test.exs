@@ -65,4 +65,44 @@ defmodule VideoTool.AssemblyTest do
     # 끝나면 다시 잡힌다.
     assert :again = Assembly.with_lock(777, fn -> :again end)
   end
+
+  # 117번 실측(2026-09-30): 대본을 존댓말로 고쳐 다시 읽혔는데 work/tts/s*.mp3 는
+  # 평서문 판(합 59.14초)이 남아 있었다. 실제 음성은 53.79초라 자막이 6.4초 밀렸다.
+  test "시간표 합이 음성 길이와 어긋나면 비율만 살리고 길이를 맞춘다" do
+    stale =
+      [7.576, 7.445, 7.288, 7.863, 6.844, 7.993, 7.393, 7.739]
+      |> Enum.with_index()
+      |> Enum.scan({nil, 0.0}, fn {d, i}, {_, cursor} ->
+        {%{"scene_id" => i + 1, "start" => cursor, "end" => cursor + d, "target_sec" => d},
+         cursor + d}
+      end)
+      |> Enum.map(&elem(&1, 0))
+
+    assert_in_delta Enum.sum(Enum.map(stale, & &1["target_sec"])), 60.141, 0.01
+
+    fixed = Assembly.fit_to_audio(stale, 53.786)
+    total = Enum.sum(Enum.map(fixed, & &1["target_sec"]))
+
+    # 음성 53.786 + 마지막 여운 1.0
+    assert_in_delta total, 54.786, 0.05
+    # 장면 사이가 벌어지거나 겹치지 않는다.
+    assert hd(fixed)["start"] == 0.0
+    assert_in_delta List.last(fixed)["end"], total, 0.05
+
+    Enum.zip(fixed, tl(fixed))
+    |> Enum.each(fn {a, b} -> assert a["end"] == b["start"] end)
+
+    # 어느 장면이 긴지는 그대로다.
+    assert Enum.map(stale, & &1["target_sec"]) |> Enum.with_index() |> Enum.max() |> elem(1) ==
+             Enum.map(fixed, & &1["target_sec"]) |> Enum.with_index() |> Enum.max() |> elem(1)
+  end
+
+  test "이미 맞으면 손대지 않는다" do
+    ok = [%{"scene_id" => 1, "start" => 0.0, "end" => 6.0, "target_sec" => 6.0}]
+    assert Assembly.fit_to_audio(ok, 5.0) == ok
+    assert Assembly.fit_to_audio(nil, 5.0) == nil
+    assert Assembly.fit_to_audio([], 5.0) == []
+    # 길이를 모르면(0) 건드리지 않는다.
+    assert Assembly.fit_to_audio(ok, 0) == ok
+  end
 end

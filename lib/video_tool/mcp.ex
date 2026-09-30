@@ -357,7 +357,12 @@ defmodule VideoTool.MCP do
         %{}
       ),
       tool("work_summary", "대기 중인 일이 몇 건인지, 시리즈가 몇 개 도는지", %{}),
-      tool("list_series", "반복 제작 설정 목록", %{}),
+      tool(
+        "list_series",
+        "반복 제작 설정 목록. **오래 못 나간 시리즈가 맨 위다** (`starved_hours` 내림차순) — " <>
+          "새 편을 만들 때는 맨 위부터 고른다. 그래야 한 시리즈만 계속 나가지 않는다",
+        %{}
+      ),
       tool(
         "list_grants",
         "기업마당 지원사업 공고 목록. **영상 주제를 여기서 고를 수 있다** — " <>
@@ -852,9 +857,19 @@ defmodule VideoTool.MCP do
     end
   end
 
+  # **오래 못 나간 시리즈를 맨 위에 둔다.** 순서가 곧 지시다.
+  #
+  # 예전에는 id 순으로 내줬다. 무인 루프 지시문에는 "list_series 로 시리즈를 보고
+  # 새 편을 만든다" 라고만 적혀 있어서 에이전트는 맨 위(id 가 작은 영양제)를 계속 집었고,
+  # 지원사업은 02:19 을 끝으로 네 시간 넘게 안 나갔다 (실측 2026-09-30: #44·#45·#46 이
+  # 연달아 영양제였다). 고르라고 해 놓고 **고를 근거를 안 준 게 원인**이다.
   defp handle("list_series", _args) do
+    last_pub = Series.last_published_by_series()
+    now = DateTime.utc_now()
+
     series =
-      Enum.map(Series.list(), fn s ->
+      Series.list()
+      |> Enum.map(fn s ->
         %{
           id: s.id,
           name: s.name,
@@ -862,6 +877,9 @@ defmodule VideoTool.MCP do
           interval_minutes: s.interval_minutes,
           languages: s.languages,
           created_count: s.created_count,
+          # 마지막으로 이 시리즈가 발행된 지 몇 시간 지났나. 큰 쪽이 밀린 쪽이다.
+          starved_hours: starved_hours(last_pub[s.id], now),
+          last_published_at: last_pub[s.id],
           # 새 편 주제를 고르기 전에 무엇이 이미 있는지 봐야 한다.
           # list_projects 로는 안 보인다 — 거기는 안 끝난 편만 내준다.
           recent: Enum.map(Series.used_topics(s.id, 12), fn {t, u} -> %{title: t, topic: u} end),
@@ -870,6 +888,7 @@ defmodule VideoTool.MCP do
           last_error: s.last_error
         }
       end)
+      |> Enum.sort_by(& &1.starved_hours, :desc)
 
     %{ok: true, series: series}
   end

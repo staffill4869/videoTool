@@ -42,8 +42,10 @@ defmodule VideoTool.Assembly do
       # 클립이 다 있으면 **클립 길이가 곧 장면 시간**이다. 글자 수 비례로 나누면
       # 영상은 8초씩 가는데 자막은 6초씩 가서 장면마다 어긋난다 (실측: 4번째에서 9초).
       timing =
-        narration_timing(project, opts[:scene_secs]) ||
-          clip_timing(project) || scene_timing(segments, duration, silences)
+        (narration_timing(project, opts[:scene_secs]) ||
+           clip_timing(project) || scene_timing(segments, duration, silences))
+        |> fit_to_audio(duration)
+
       cps = measured_cps(segments, duration)
 
       attrs = %{
@@ -174,6 +176,47 @@ defmodule VideoTool.Assembly do
 
   # 장면별 TTS 는 work/tts/s01.mp3 규칙으로 떨어져 있다. 부르는 쪽이 길이를 안 넘겨주면
   # 여기서 직접 잰다 — 안 넘겨줬다는 이유로 틀린 시간표를 쓰는 것보다 낫다.
+  # 시간표의 합은 **실제 음성 길이**와 같아야 한다. 이걸 아무도 확인하지 않아서
+  # 조용히 어긋난 채로 발행됐다.
+  #
+  # 실측(117번, 2026-09-30): 대본을 존댓말로 고쳐 다시 읽혔는데 `work/tts/s*.mp3` 는
+  # 04:07 에 만든 평서문 판이 그대로 남아 있었다. `measure_scene_tts` 는 그 파일이
+  # 지금 나레이션의 것인지 보지 않으므로 합 59.14초를 그대로 믿었고, 실제 음성은
+  # 53.79초였다. 60.14초짜리 시간표에 53.79초 음성이 얹혀 뒤로 갈수록 자막이 밀렸다.
+  #
+  # 장면별 파일이 낡았는지 새것인지 알 방법이 없으니 **결과를 검산한다** —
+  # 합이 음성 길이와 다르면 장면 비율만 살리고 길이를 실제에 맞춘다.
+  # 비율을 버리지 않는 이유: 어느 장면이 긴지는 대개 맞고, 틀린 건 전체 축척뿐이다.
+  @drift_tol 0.5
+
+  @doc false
+  def fit_to_audio(nil, _duration), do: nil
+  def fit_to_audio([], _duration), do: []
+
+  def fit_to_audio(timing, duration) when is_number(duration) and duration > 0 do
+    total = Enum.reduce(timing, 0.0, &((&1["target_sec"] || 0.0) + &2))
+    # 마지막 장면의 여운(@last_tail_sec)만큼은 음성보다 길어도 맞는 것이다.
+    want = duration + @last_tail_sec
+
+    if total <= 0.0 or abs(total - want) <= @drift_tol do
+      timing
+    else
+      k = want / total
+
+      {rows, _} =
+        Enum.map_reduce(timing, 0.0, fn row, cursor ->
+          d = Float.round((row["target_sec"] || 0.0) * k, 3)
+          stop = Float.round(cursor + d, 3)
+
+          {%{row | "start" => Float.round(cursor, 3), "end" => stop, "target_sec" => d}, stop}
+        end)
+
+      rows
+    end
+  end
+
+  def fit_to_audio(timing, _duration), do: timing
+
   defp measure_scene_tts(project) do
     dir = Path.join([work_dir(project), "work", "tts"])
 
