@@ -71,6 +71,11 @@ defmodule VideoTool.Presets.Voice do
   schema "voices" do
     field :provider, :string, default: "higgsfield"
     field :voice_id, :string
+    # **일레븐랩스 목소리 id.** `voice_id` 는 힉스필드 UUID 라 나레이션에 못 쓴다.
+    # 두 체계가 안 맞아서 generate_narration 이 이 표를 못 쓰고, 에이전트가
+    # 그때그때 넣는 id 로 읽혔다 — 한국어 대본을 영어 목소리(Adam)로 읽은 편이
+    # 그대로 발행됐다 (실측 2026-09-30).
+    field :eleven_voice_id, :string, default: ""
     field :variant, :string, default: "elevenlabs"
     field :display_name, :string
     field :slug, :string
@@ -87,7 +92,7 @@ defmodule VideoTool.Presets.Voice do
     timestamps(type: :utc_datetime)
   end
 
-  @fields ~w(provider voice_id variant display_name slug lang chars_per_sec
+  @fields ~w(provider voice_id eleven_voice_id variant display_name slug lang chars_per_sec
              sample_count is_default preview_url gender speech_rate)a
 
   # 속도를 넉넉히 열어두면 결국 길이 맞추는 데 쓰게 된다. 좁게 막아둔다.

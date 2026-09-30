@@ -21,7 +21,14 @@ defmodule VideoTool.Narration do
 
   @doc "opts: voice_id (없으면 project.variables[\"eleven_voice_id\"]), model_id, language (기본 ko)"
   def generate(project, opts \\ []) do
-    voice = opts[:voice_id] || get_in(project.variables || %{}, ["eleven_voice_id"])
+    # **목소리는 시리즈에 박힌 것이 먼저다.** opts 를 앞에 두면 에이전트가 넣는 값이
+    # 매번 이긴다 — 실측(2026-09-30, 2시간 로그): 한 채널 안에서 영어 목소리 Adam 3회,
+    # 힉스필드 UUID 2회가 섞여 편마다 목소리가 달랐고, 한국어 대본을 영어 목소리로
+    # 읽은 편이 그대로 발행됐다.
+    voice =
+      pinned_voice(project) ||
+        get_in(project.variables || %{}, ["eleven_voice_id"]) ||
+        opts[:voice_id]
     key = Settings.get(:elevenlabs_api_key)
     lang = opts[:language] || project.language || "ko"
 
@@ -62,6 +69,17 @@ defmodule VideoTool.Narration do
       end
     end
   end
+
+  # 프로젝트에 붙은 목소리(시리즈에서 물려받는다)의 일레븐랩스 id.
+  # `voices.voice_id` 는 힉스필드 UUID 라 나레이션에 못 쓴다 — 그래서 칸을 따로 뒀다.
+  defp pinned_voice(%{voice_id: id}) when not is_nil(id) do
+    case VideoTool.Repo.get(VideoTool.Presets.Voice, id) do
+      %{eleven_voice_id: v} when is_binary(v) and v != "" -> v
+      _ -> nil
+    end
+  end
+
+  defp pinned_voice(_), do: nil
 
   defp need(v, _msg) when is_binary(v) and v != "", do: :ok
   defp need(_, msg), do: {:error, msg}
