@@ -19,6 +19,7 @@ defmodule VideoTool.YouTube.Upload do
   @thumbnail_url "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
   @captions_url "https://www.googleapis.com/upload/youtube/v3/captions"
   @comments_url "https://www.googleapis.com/youtube/v3/commentThreads"
+  @rate_url "https://www.googleapis.com/youtube/v3/videos/rate"
 
   # 올린 뒤 채널 이름으로 남기는 첫 댓글. 쇼츠는 설명을 잘 안 열어 보므로
   # 구독 유도는 여기가 제일 잘 보인다.
@@ -48,7 +49,8 @@ defmodule VideoTool.YouTube.Upload do
          url: "https://youtu.be/#{video_id}",
          thumbnail: maybe_thumbnail(token, video_id, render),
          captions: maybe_captions(token, video_id, publication, project),
-         comment: maybe_comment(token, video_id, publication)
+         comment: maybe_comment(token, video_id, publication),
+         like: maybe_like(token, video_id, publication)
        }}
     end
   end
@@ -142,6 +144,27 @@ defmodule VideoTool.YouTube.Upload do
   end
 
   # ── 섬네일 · 자막 ───────────────────────────────────────────────
+
+  @doc false
+  # 자기 채널 영상에 좋아요. 유튜브 화면에서 사람이 누르는 것과 같은 동작이다.
+  #
+  # **할당량을 잡아먹는다.** 업로드 1,600 · 댓글 50 · 좋아요 50 이라 한 편에 1,700 이다.
+  # 하루 한도 10,000 이면 5편이 끝이다 — 6편이면 10,200 으로 넘쳐 마지막 편이 통째로 막힌다.
+  # 그래서 기본 상한을 5편으로 내렸다. 편수를 늘리려면 좋아요부터 뺀다.
+  def maybe_like(_token, _video_id, %{privacy: "private"}), do: %{ok: false, reason: "비공개"}
+
+  def maybe_like(token, video_id, _publication) do
+    case Req.post(@rate_url,
+           params: [id: video_id, rating: "like"],
+           headers: [{"authorization", "Bearer " <> token}],
+           body: "",
+           receive_timeout: 30_000
+         ) do
+      {:ok, %{status: status}} when status in [200, 204] -> %{ok: true}
+      {:ok, %{status: status, body: body}} -> %{ok: false, reason: "#{status}: #{describe(body)}"}
+      {:error, reason} -> %{ok: false, reason: inspect(reason)}
+    end
+  end
 
   @doc false
   # 첫 댓글. 비공개(private) 영상에는 달지 않는다 — 아무도 못 보는데 할당량만 나간다.

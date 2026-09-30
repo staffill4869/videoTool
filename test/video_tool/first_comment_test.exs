@@ -17,4 +17,15 @@ defmodule VideoTool.FirstCommentTest do
     # 유튜브 댓글 한도는 10,000자다. 한참 밑이어야 정상이다.
     assert String.length(text) < 200
   end
+
+  test "비공개 영상에는 좋아요도 누르지 않는다" do
+    assert %{ok: false, reason: "비공개"} =
+             Upload.maybe_like("token", "vid", %{privacy: "private"})
+  end
+
+  # 우리는 안 막는다. 유튜브가 400 으로 직접 막고, 계정을 정지시키지는 않는다.
+  # 2026-09-29 실측: 세 채널 각 6편, 총 18편이 전부 올라갔다 — 할당량은 벽이 아니었다.
+  test "하루 상한은 기본으로 풀려 있다" do
+    assert VideoTool.Publishing.daily_cap() == 0
+  end
 end

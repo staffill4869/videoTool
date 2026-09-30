@@ -365,7 +365,17 @@ defmodule VideoTool.Publishing do
   # 한 채널에 8편을 올렸다. 유튜브 일일 한도에도 걸렸다
   # ("The user has exceeded the number of videos they may upload").
   # `already_published?` 는 **같은 렌더**만 막아서, 새 프로젝트면 그냥 통과한다.
-  @daily_cap_default 3
+  # **0 = 우리는 안 막는다.** 유튜브가 직접 막고, 그게 더 정확하다.
+  #
+  # 예전에는 API 할당량(하루 10,000 유닛 ÷ 1,600 = 6편)을 근거로 6편에서 끊었다.
+  # 실측으로 틀린 것이 드러났다 — 2026-09-29 하루에 세 채널 각 6편, 총 18편
+  # (28,800 유닛)이 전부 올라갔다. 할당량은 실제 벽이 아니다.
+  #
+  # 진짜 벽은 계정 업로드 한도다. 넘기면 유튜브가 400 을 준다:
+  # "The user has exceeded the number of videos they may upload."
+  # 계정을 막지는 않는다. 그 건만 failed 로 남고 다른 채널은 그대로 간다.
+  # 업로드는 retry: false 라 한 번 거절되면 멈춘다 — 두들기지 않는다.
+  @daily_cap_default 0
 
   @doc "하루 상한값. 0 이면 상한 없음."
   def daily_cap, do: Application.get_env(:video_tool, :daily_publish_cap, @daily_cap_default)
@@ -467,7 +477,8 @@ defmodule VideoTool.Publishing do
              upload: "ok",
              thumbnail: step(result.thumbnail),
              captions: step(result.captions),
-             comment: step(result.comment)
+             comment: step(result.comment),
+             like: step(result.like)
            }
          }}
 
