@@ -182,12 +182,35 @@ defmodule VideoTool.Insights do
 
   @doc "발행 이력이 있는 것 목록. 측정치를 넣을 대상을 고를 때 쓴다."
   def measurable_publications do
+    rows =
+      Repo.all(
+        from p in Publication,
+          where: p.status == "published",
+          order_by: [desc: p.published_at],
+          preload: [:channel, :project]
+      )
+
+    latest = latest_metrics(Enum.map(rows, & &1.id))
+    Enum.map(rows, &Map.put(&1, :latest, Map.get(latest, &1.id)))
+  end
+
+  @doc """
+  발행물마다 **가장 마지막으로 잰 값.**
+
+  화면이 이걸 안 보여줘서 "성과가 하나도 없다" 로 보였다 (2026-09-30).
+  실제로는 63건 중 41건에 값이 들어 있었는데, 입력 칸만 비어 있으니
+  집계가 안 된 것처럼 읽혔다. 잰 값이 있으면 칸 옆에 같이 보여준다.
+  """
+  def latest_metrics([]), do: %{}
+
+  def latest_metrics(publication_ids) do
     Repo.all(
-      from p in Publication,
-        where: p.status == "published",
-        order_by: [desc: p.published_at],
-        preload: [:channel, :project]
+      from m in Metric,
+        where: m.publication_id in ^publication_ids,
+        distinct: m.publication_id,
+        order_by: [asc: m.publication_id, desc: m.collected_at, desc: m.id]
     )
+    |> Map.new(&{&1.publication_id, &1})
   end
 
   @doc """

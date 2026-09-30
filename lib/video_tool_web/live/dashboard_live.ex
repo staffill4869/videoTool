@@ -25,6 +25,17 @@ defmodule VideoToolWeb.DashboardLive do
     )
   end
 
+  # 언제 쟀는지. 정확한 시각보다 "얼마나 묵었나" 가 판단에 쓰인다.
+  defp when_measured(nil), do: "—"
+
+  defp when_measured(at) do
+    case DateTime.diff(DateTime.utc_now(), at, :minute) do
+      m when m < 60 -> "#{m}분 전"
+      m when m < 1440 -> "#{div(m, 60)}시간 전"
+      m -> "#{div(m, 1440)}일 전"
+    end
+  end
+
   # ── 이벤트 ──────────────────────────────────────────────────────
 
   @impl true
@@ -99,7 +110,7 @@ defmodule VideoToolWeb.DashboardLive do
       <.header>
         성과
         <:subtitle>
-          발행물마다 가장 최근 측정치로 합산한다. 자동 수집은 OAuth 가 붙은 뒤다 — 지금은 손으로 넣는다.
+          발행물마다 가장 최근 측정치로 합산한다. 「유튜브에서 수집」 을 누르면 API 키로 긁어 온다 — 손으로 넣을 필요가 없다.
         </:subtitle>
         <:actions>
           <.button
@@ -193,7 +204,8 @@ defmodule VideoToolWeb.DashboardLive do
       <div :if={@publications != []} class="mt-8">
         <h2 class="mb-2 text-lg font-semibold">성과 입력</h2>
         <p class="mb-2 text-sm text-base-content/60">
-          플랫폼 화면의 숫자를 그대로 넣는다. 잴 때마다 새 줄로 쌓여서 증가 추이가 남는다.
+          초록 숫자가 <strong>마지막으로 잰 값</strong>이다. 입력 칸은 손으로 고칠 때만 쓴다 —
+          비어 있다고 집계가 없는 것이 아니다. 잴 때마다 새 줄로 쌓여서 증가 추이가 남는다.
         </p>
 
         <form :for={p <- @publications} phx-submit="record" class="mb-2 flex flex-wrap items-end gap-2">
@@ -201,6 +213,13 @@ defmodule VideoToolWeb.DashboardLive do
           <div class="w-64 truncate text-sm">
             <div class="font-medium">{p.project.title}</div>
             <div class="font-mono text-xs opacity-60">{p.channel.slug} · {p.project.language}</div>
+            <%!-- 마지막으로 잰 값. 없으면 "아직 안 잼" 이라고 적는다 —
+                  빈칸만 있으면 집계가 안 된 것으로 읽힌다 (2026-09-30). --%>
+            <div :if={p.latest} class="mt-0.5 font-mono text-xs text-success">
+              {p.latest.views} 회 · 좋아요 {p.latest.likes} · 댓글 {p.latest.comments}
+              <span class="opacity-50">· {when_measured(p.latest.collected_at)}</span>
+            </div>
+            <div :if={is_nil(p.latest)} class="mt-0.5 text-xs opacity-40">아직 안 쟀습니다</div>
           </div>
           <label class="form-control">
             <span class="label-text text-xs">조회수</span>
