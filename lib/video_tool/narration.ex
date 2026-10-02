@@ -15,7 +15,10 @@ defmodule VideoTool.Narration do
   alias VideoTool.{Assembly, Ffmpeg, Projects, Settings, SpeechText}
 
   @url "https://api.elevenlabs.io/v1/text-to-speech"
-  @model "eleven_multilingual_v2"
+  # **감정 태그를 읽는 모델을 쓰면 안 된다.** multilingual_v2 는 `[curious]` 를 그대로
+  # 소리 내어 읽는다 — 152번 첫 문장이 "큐리어스 가게를 넓히려고…" 로 나갔다
+  # (사용자 지적 2026-10-02). v3 는 태그를 연기 지시로 해석하고 읽지 않는다.
+  @model "eleven_v3"
   @gap 0.3
   @cap 7.95
 

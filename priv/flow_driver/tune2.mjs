@@ -1,0 +1,12 @@
+import { chromium } from "playwright-core";
+const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+const ctx = browser.contexts()[0];
+const page = ctx.pages().find((p) => p.url().includes("flow.google.com")) || ctx.pages()[0];
+await page.setViewportSize({ width: 1400, height: 900 }).catch(() => {});
+await page.keyboard.press("Escape"); await page.waitForTimeout(600);
+await page.keyboard.press("Escape"); await page.waitForTimeout(600);
+await page.locator("button", { hasText: /^tune$/ }).first().click().catch((e) => console.log("err", e.message));
+await page.waitForTimeout(1800);
+await page.screenshot({ path: "/tmp/mode.png" });
+console.log("shot");
+await browser.close();

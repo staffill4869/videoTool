@@ -61,7 +61,7 @@ defmodule VideoTool.Assembly do
       }
 
       with {:ok, narration} <- Media.create_narration(attrs) do
-        rows = subtitle_rows(segments, timing)
+        rows = subtitle_rows(segments, timing, silences, duration)
         {:ok, _} = Media.replace_subtitles(narration, rows)
         {:ok, _} = Projects.sync_status(project.id)
 
@@ -275,7 +275,15 @@ defmodule VideoTool.Assembly do
         true -> {:error, "음성 파일을 찾을 수 없습니다: #{src}"}
       end
 
-    with {:ok, path} <- placed, do: retime(path, speech_rate(project))
+    # **이미 이 프로젝트 안에 있던 파일이면 속도를 다시 먹이지 않는다.**
+    # generate_narration 이 만든 narration.mp3 를 그대로 save_narration 에 넘기면
+    # 낭독 속도(유니 1.12배)가 두 번 들어가 25.23초가 22.54초로 줄었다
+    # (실측 2026-10-02: 자막만 다시 깔려다가 음성을 깎아 먹었다).
+    same = match?({:ok, ^dest}, placed) and Path.expand(src) == Path.expand(dest)
+
+    with {:ok, path} <- placed do
+      if same, do: {:ok, path}, else: retime(path, speech_rate(project))
+    end
   end
 
   @doc false
@@ -401,18 +409,79 @@ defmodule VideoTool.Assembly do
 
   # 한 장면의 대사를 문장 단위로 쪼개 자막 줄을 만든다.
   # 문장 길이 비례로 시간을 나눈다 — 단어 단위 타임스탬프가 없으니 이게 최선이다.
-  defp subtitle_rows(segments, timing) do
+  @doc false
+  def subtitle_rows_for_test(segments, timing, silences, duration),
+    do: subtitle_rows(segments, timing, silences, duration)
+
+  defp subtitle_rows(segments, timing, silences, duration) do
     by_scene = Map.new(timing, &{&1["scene_id"], &1})
+    runs = speech_runs(silences, duration)
+
+    # **말 토막 수가 장면 수와 맞으면 그걸 그대로 쓴다.** 장면 구간은 클립 길이에서
+    # 나오는지라 음성이 어디서 시작하는지 모른다 — 실측(152번)에서 5장면 자막이
+    # 말보다 0.52초 늦게 떴고 0.91초 늦게 사라졌다. 음성에서 직접 뽑으면 어긋날 수가 없다.
+    windows =
+      if length(runs) == length(segments) do
+        Enum.zip(segments, runs) |> Map.new(fn {seg, run} -> {seg.scene_id, run} end)
+      else
+        %{}
+      end
 
     segments
     |> Enum.flat_map(fn seg ->
-      case Map.get(by_scene, seg.scene_id) do
+      case Map.get(windows, seg.scene_id) || span(by_scene, seg, silences) do
         nil -> []
-        t -> split_lines(seg.text || "", t["start"], t["end"])
+        {from, to} -> split_lines(seg.text || "", from, to)
       end
     end)
     |> Enum.with_index(1)
     |> Enum.map(fn {row, i} -> Map.put(row, :index, i) end)
+  end
+
+  # 나레이션을 장면 사이 묵음으로 갈라 **말이 이어지는 토막**들을 뽑는다.
+  # 0.25초를 넘는 묵음만 장면 경계로 본다 — 쉼표 뒤의 짧은 쉼(0.18초)까지 세면
+  # 토막이 장면보다 많아진다.
+  defp speech_runs(silences, duration) do
+    gaps =
+      silences
+      |> Enum.filter(&(&1["end"] - &1["start"] >= 0.25))
+      |> Enum.sort_by(& &1["start"])
+
+    {runs, last} =
+      Enum.map_reduce(gaps, 0.0, fn g, from ->
+        {{Float.round(from, 3), Float.round(g["start"], 3)}, g["end"]}
+      end)
+
+    runs ++ [{Float.round(last, 3), Float.round(duration, 3)}]
+  end
+
+  defp span(by_scene, seg, silences) do
+    case Map.get(by_scene, seg.scene_id) do
+      nil -> nil
+      t -> speech_window(t["start"], t["end"], silences)
+    end
+  end
+
+  # **자막은 말하는 구간에만 깐다.**
+  # 장면 구간에는 나레이션이 넣은 뒤쪽 묵음(0.3초)이 들어 있다. 그걸 포함해 두 줄을
+  # 글자수 비례로 나누면 둘째 줄이 매번 0.2~0.4초 늦게 뜨고, 말이 끝난 뒤에도 남는다.
+  # 오차가 장면마다 쌓여 마지막엔 1초까지 벌어졌다 (실측 2026-10-02, 152번).
+  # 그래서 구간의 앞뒤에 걸친 무음을 잘라내고 남은 곳에만 깐다.
+  defp speech_window(from, to, silences) do
+    head =
+      silences
+      |> Enum.filter(&(&1["start"] <= from + 0.05 and &1["end"] > from and &1["end"] < to))
+      |> Enum.map(& &1["end"])
+      |> Enum.max(fn -> from end)
+
+    tail =
+      silences
+      |> Enum.filter(&(&1["end"] >= to - 0.05 and &1["start"] < to and &1["start"] > head))
+      |> Enum.map(& &1["start"])
+      |> Enum.min(fn -> to end)
+
+    # 다 잘라내 구간이 사라지면 손대지 않는다 — 자막이 없는 것보다 조금 늦는 게 낫다.
+    if tail - head >= 0.4, do: {Float.round(head, 3), Float.round(tail, 3)}, else: {from, to}
   end
 
   # 자막 한 줄의 최대 글자 수. 세로 1080 폭에 84pt 면 한 줄에 열두 자쯤 들어가므로
@@ -842,7 +911,7 @@ defmodule VideoTool.Assembly do
       ["-v", "error", "-y"] ++
         Enum.flat_map(pieces, &["-i", &1]) ++
         ["-filter_complex", Enum.join(filters, ";"), "-map", "[#{vlabel}]"] ++
-        (if audio?, do: ["-map", "[#{alabel}]", "-c:a", "aac", "-b:a", "192k"], else: ["-an"]) ++
+        (if audio?, do: ["-map", "[#{alabel}]", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"], else: ["-an"]) ++
         ["-s", "#{w}x#{h}", "-r", "30", "-c:v", "libx264", "-preset", "medium",
          "-crf", "23", "-pix_fmt", "yuv420p", out]
 
@@ -893,7 +962,7 @@ defmodule VideoTool.Assembly do
   # 통째로 사라진다 (실측: 합성본에 나레이션만 남았다).
   defp audio_args(src, af) do
     if has_audio?(src) do
-      if(af, do: ["-filter:a", af], else: []) ++ ["-c:a", "aac", "-b:a", "192k"]
+      if(af, do: ["-filter:a", af], else: []) ++ ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
     else
       ["-an"]
     end
@@ -998,7 +1067,7 @@ defmodule VideoTool.Assembly do
         audio ++
         [
           "-c:v", "copy",
-          "-c:a", "aac", "-b:a", "192k",
+          "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
           "-t", f(total),
           out
         ]
@@ -1165,7 +1234,7 @@ defmodule VideoTool.Assembly do
   #
   # **편마다 새로 만들지 않는다.** 시리즈마다 한 번 만들어 둔 파일을 그대로 이어 붙인다.
   # 인물이 엄지를 들고 "구독과 좋아요 눌러주세요" 를 말하는 2~3초짜리다.
-  # 본편과 **같은 설정으로 구워 뒀기 때문에**(1080x1920 · 30fps · h264 · aac 44100 스테레오)
+  # 본편과 **같은 설정으로 구워 뒀기 때문에**(1080x1920 · 30fps · h264 · aac 48000 스테레오)
   # `-c copy` 로 붙는다 — 전체를 다시 인코딩하면 2 vCPU 에서 몇 분이 더 든다.
   #
   # 파일이 없으면 그냥 넘어간다. 시리즈마다 만들 의무는 없다.

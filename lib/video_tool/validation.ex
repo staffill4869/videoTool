@@ -146,6 +146,18 @@ defmodule VideoTool.Validation do
         gap = abs(render.duration_sec - narration.duration_sec - extra)
         subtitles = Media.subtitles(narration.id)
 
+        # **클립 화면비를 발행 직전에 한 번 더 본다.**
+        # 이 검사는 원래 "clips" 단계에만 있었다. 그런데 발행 전에 부르는 것은 "final"
+        # 하나뿐이라, 가로로 생성된 클립 하나가 그대로 통과해 유튜브에 올라갔다 —
+        # 9:16 틀 가운데에 검은 띠가 위아래로 깔린 채였다
+        # (실측 2026-10-02: 152번 3장면만 1280x720, 나머지는 720x1280).
+        # 버린 클립은 합성에 안 쓰이니 보지 않는다 — 안 거르면 고쳐 놓고도 계속 막힌다.
+        aspect =
+          project.id
+          |> Media.list_assets("clip")
+          |> Enum.reject(&(&1.status == "rejected"))
+          |> then(&aspect_problems(project, &1))
+
         problems =
           [
             {gap > 2.0, "완성본 #{fmt(render.duration_sec)}초 / 나레이션 #{fmt(narration.duration_sec)}초 — 2초를 넘게 어긋납니다"},
@@ -153,13 +165,15 @@ defmodule VideoTool.Validation do
           ]
           |> Enum.filter(&elem(&1, 0))
           |> Enum.map(&%{"scene_no" => nil, "issue" => elem(&1, 1)})
+          |> Kernel.++(aspect)
 
         finish(
           %{
             "render_exists" => true,
             "narration_exists" => true,
             "duration_match" => gap <= 2.0,
-            "subtitles" => subtitles != []
+            "subtitles" => subtitles != [],
+            "clip_aspect" => aspect == []
           },
           problems,
           []

@@ -1135,7 +1135,9 @@ defmodule VideoTool.MCP do
   defp handle("flow_generate", args) do
     with {:ok, project} <- Projects.get_project(args["project_id"]),
          {:ok, stage} <- resolve_stage(project, args["stage"]),
-         nil <- Jobs.running_flow_job(project.id),
+         # **다른 편이 Flow 를 쓰고 있어도 막는다.** 창이 하나뿐이라 겹치면 둘 다 깨진다.
+         # 진짜 자물쇠는 run_stage_async 안에 있고, 여기 검사는 말이 되는 오류를 주려고 둔다.
+         [] <- Jobs.running_flow_jobs(),
          want = wanted_scenes(project, stage, args["scene_nos"]),
          {:ok, text} <- Prompt.render(project, stage, scene_no: want),
          # 편집기가 열려 있는지까지 볼 필요는 없다 — run_stage 가 이 편의 Flow

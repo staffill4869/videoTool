@@ -502,23 +502,61 @@ defmodule VideoTool.Flow do
   Veo 는 분 단위로 걸린다. MCP 호출이 그동안 붙잡혀 있으면 클라이언트가 먼저 끊는다.
   그래서 진행 상태를 GenerationJob 행에 남기고 `next/1` 은 곧바로 `wait` 를 돌려준다.
   """
+  # Flow 작업 자리를 잡는 데 쓰는 자물쇠 번호. 값 자체는 아무래도 좋지만
+  # 이 앱 안에서는 하나로 고정해야 서로를 막는다.
+  @flow_lock_key 718_241
+
   def run_stage_async(project, stage, prompt, expect, scenes \\ nil) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    {:ok, job} =
-      Jobs.record_generation(%{
-        project_id: project.id,
-        provider: "flow",
-        model: stage,
-        status: "running",
-        requested_at: now
-      })
+    # **Flow 는 브라우저 창 하나다. 둘이 동시에 들어가면 서로 깨뜨린다.**
+    #
+    # 예전에는 부르는 쪽에서 `running_flow_job(project.id)` 로 **그 프로젝트 것만** 봤다.
+    # 그래서 다른 편이 Flow 를 쓰고 있어도 그냥 통과했다 — 152 와 153 이 15초 차이로
+    # 들어가 한쪽이 "프롬프트 입력칸을 못 찾았다" 로 죽었다 (실측 2026-10-02). 154 도 같았다.
+    #
+    # 전부를 보도록 바꾸는 것만으로는 모자라다. 보고 나서 넣기까지의 틈에 또 끼어든다.
+    # 그래서 **보는 것과 넣는 것을 한 트랜잭션에** 묶고 그 앞에 DB 자물쇠를 건다.
+    # 자물쇠는 트랜잭션이 끝나면 저절로 풀린다.
+    #
+    # 작업이 도는 동안의 자물쇠는 `status: "running"` 행 자체다 — 끝나면 상태가 바뀌고,
+    # 서버가 죽어 행만 남으면 뜰 때 `sweep_orphaned_flow_jobs` 가 치운다.
+    result =
+      VideoTool.Repo.transaction(fn ->
+        VideoTool.Repo.query!("SELECT pg_advisory_xact_lock($1)", [@flow_lock_key])
 
-    Task.Supervisor.start_child(VideoTool.TaskSupervisor, fn ->
-      run_stage(job, project, stage, prompt, expect, scenes)
-    end)
+        case Jobs.running_flow_jobs() do
+          [] ->
+            {:ok, job} =
+              Jobs.record_generation(%{
+                project_id: project.id,
+                provider: "flow",
+                model: stage,
+                status: "running",
+                requested_at: now
+              })
 
-    {:ok, job}
+            job
+
+          [busy | _] ->
+            VideoTool.Repo.rollback(
+              "Flow 가 이미 #{busy.project_id}번의 #{busy.model} 작업을 돌고 있습니다. " <>
+                "끝나면 다시 부르세요 — 창이 하나뿐이라 겹치면 둘 다 깨집니다."
+            )
+        end
+      end)
+
+    case result do
+      {:ok, job} ->
+        Task.Supervisor.start_child(VideoTool.TaskSupervisor, fn ->
+          run_stage(job, project, stage, prompt, expect, scenes)
+        end)
+
+        {:ok, job}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   # 다운로드 버튼을 누르지 않는다. 생성이 끝나면 곧바로 화면에서 받아 자산으로 등록한다 —

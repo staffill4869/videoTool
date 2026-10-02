@@ -87,7 +87,7 @@ defmodule VideoTool.Progress do
       title: p.title,
       # 목록에 시리즈 이름과 번호만 뜨면 어떤 편인지 알 수 없다 — "영양제 #59" 가
       # 유산균인지 콜라겐인지 구분이 안 된다. 주제 첫 토막을 같이 보여 준다.
-      topic: p.topic |> to_string() |> String.split(~r/[—.·]/) |> List.first() |> String.trim(),
+      topic: p.topic |> to_string() |> String.split(~r/[—.·]/u) |> List.first() |> String.trim(),
       status: p.status,
       aspect: p.aspect,
       voice: p.voice && p.voice.display_name,
