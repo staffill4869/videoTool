@@ -35,9 +35,12 @@ wait_idle() {
 # 아직 클립이 없는 장면 번호들
 missing() { PRJ=$1 MIX_ENV=dev mix run /tmp/missing.exs 2>/dev/null | grep '^MISS' | sed 's/^MISS *//'; }
 
-stage_for() {  # 어느 단계가 비어 있나
-  PRJ=$1 MIX_ENV=dev mix run /tmp/stage.exs 2>/dev/null | grep '^STAGE' | sed 's/^STAGE //'
-}
+# 이 프로젝트의 장면 번호들. 묶음을 **장면 수에 맞춰** 만든다 —
+# "1,2,3,4" "5,6,7,8" 로 박아 뒀더니 훅 장면이 들어와 9개가 된 날 9번이 통째로 빠졌다.
+scene_nos() { PRJ=$1 MIX_ENV=dev mix run /tmp/scenes.exs 2>/dev/null | grep '^SCENES' | sed 's/^SCENES *//'; }
+
+# 그 단계에서 아직 자산이 없는 장면 번호들.
+stage_missing() { PRJ=$1 MIX_ENV=dev mix run /tmp/stage.exs 2>/dev/null | grep "^NEED $2 " | sed "s/^NEED $2 *//"; }
 
 build() {
   local P=$1
@@ -58,13 +61,25 @@ print('; '.join(p.get('issue','') for p in json.load(sys.stdin).get('problems',[
 
   for st in clean info; do
     local need
-    need=$(stage_for "$P" | tr ' ' '\n' | grep "^$st:" | cut -d: -f2)
+    need=$(stage_missing "$P" "$st")
     [ -z "$need" ] && continue
-    for grp in "1,2,3,4" "5,6,7,8"; do
+    local grp=""
+    local cnt=0
+    for n in $need; do
+      grp="${grp:+$grp,}$n"
+      cnt=$((cnt + 1))
+      if [ "$cnt" -ge 4 ]; then
+        wait_idle || return 1
+        say "$P $st [$grp]"
+        call flow_generate "{\"project_id\":$P,\"stage\":\"$st\",\"scene_nos\":[$grp]}" >/dev/null
+        grp=""; cnt=0
+      fi
+    done
+    if [ -n "$grp" ]; then
       wait_idle || return 1
       say "$P $st [$grp]"
       call flow_generate "{\"project_id\":$P,\"stage\":\"$st\",\"scene_nos\":[$grp]}" >/dev/null
-    done
+    fi
   done
 
   for try in 1 2; do
