@@ -1008,8 +1008,7 @@ defmodule VideoTool.Assembly do
     {w, h} = if aspect == "9:16", do: {1080, 1920}, else: {1920, 1080}
 
     chain =
-      [pre, "scale=#{w}:#{h}:force_original_aspect_ratio=decrease",
-       "pad=#{w}:#{h}:(ow-iw)/2:(oh-ih)/2:black", "setsar=1"]
+      [pre, fill_filter(w, h)]
       |> Enum.reject(&is_nil/1)
       |> Enum.join(",")
 
@@ -1021,6 +1020,22 @@ defmodule VideoTool.Assembly do
       "-crf", "23",
       "-pix_fmt", "yuv420p"
     ]
+  end
+
+  @doc """
+  화면비가 판과 다른 클립을 채우는 필터.
+
+  **검은 띠로 채우면 안 된다.** `pad=...:black` 으로 두면 세로 판에 가로 클립이
+  들어올 때 위아래가 까맣게 나간다 — 153(안산시)에서 사용자 지적 "이건 뭥;ㅁ",
+  157 1번 장면도 같은 꼴이었다. 그때는 손으로만 고치고 여기를 안 고쳐서 재발했다.
+  대신 같은 그림을 꽉 채워 흐리게 깐 뒤 원본을 가운데 얹는다.
+  """
+  def fill_filter(w, h) do
+    "split[bg][fg];" <>
+      "[bg]scale=#{w}:#{h}:force_original_aspect_ratio=increase," <>
+      "crop=#{w}:#{h},boxblur=20:2[bgb];" <>
+      "[fg]scale=#{w}:#{h}:force_original_aspect_ratio=decrease[fgs];" <>
+      "[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1"
   end
 
   defp done(args, out) do
