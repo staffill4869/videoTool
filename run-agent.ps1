@@ -13,7 +13,10 @@
 
 param(
   [switch]$DryRun,
-  [int]$TimeoutSec = 1800
+  [switch]$NoPublish,          # 시험 실행: 합성까지만 하고 유튜브에 올리지 않는다
+  [int]$TimeoutSec = 2400,     # 에이전트 한 번 호출의 상한.
+                               # 한 라운드에 CLEAN→INFO→VIDEO 를 다 미는 걸 봤다 — 15분은 짧다
+  [int]$Rounds = 10            # 한 실행에서 에이전트를 최대 몇 번 깨울지
 )
 
 $ErrorActionPreference = "Stop"
@@ -184,30 +187,101 @@ videoTool MCP 서버(videotool 또는 videocrm)에 붙어서 영상을 끝까지
 시간이 얼마 안 남았으면 새 편을 시작하지 말고, 만든 편과 올린 주소를 한 줄로 보고하고 종료해.
 '@
 
+# 시험 실행이면 발행을 막는다. 유튜브 업로드는 되돌릴 수 없어서 시험에 넣지 않는다.
+if ($NoPublish) {
+  $prompt += "`n`n**이번 실행은 시험이다. [8] 발행을 하지 마라.**`n[7] 합성까지만 하고, 만든 편의 id 와 완성본 경로를 한 줄로 보고하고 끝내라.`n한 편만 하고 멈춰라 — 다음 편으로 넘어가지 마라."
+  Say "시험 실행: 발행 없음, 한 편만"
+}
+
 New-Item -ItemType File -Path $lock -Force | Out-Null
-Say "에이전트를 깨웁니다 (최대 $TimeoutSec 초)"
 
-try {
-  $out = Join-Path $logDir ("run-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".txt")
-
-  # --print: 대화창 없이 한 번 돌고 끝난다.
-  $p = Start-Process -FilePath "claude" `
-    -ArgumentList "--print", "--permission-mode", "acceptEdits" `
-    -WorkingDirectory $root `
-    -RedirectStandardInput (New-TemporaryFile | ForEach-Object { $prompt | Set-Content $_ -Encoding utf8; $_ }) `
-    -RedirectStandardOutput $out `
-    -RedirectStandardError "$out.err" `
-    -NoNewWindow -PassThru
-
-  if (-not $p.WaitForExit($TimeoutSec * 1000)) {
-    Say "시간 초과 — 에이전트를 종료합니다"
-    $p.Kill()
-  } else {
-    Say "에이전트 종료 (코드 $($p.ExitCode))"
+# 진척 지표: 모든 프로젝트의 자산(clean+info+clip) + 완성본 총합.
+# 이 숫자가 늘었으면 뭔가 만들어진 것이다. 조회 실패는 -1 로 돌려
+# '모른다' 와 '제자리' 를 구분한다 — 모르면 멈추지 않는다.
+function Get-Progress {
+  try {
+    $r = Invoke-RestMethod -Uri "$api/api/tools/list_projects" -Method Post `
+         -Body '{}' -ContentType "application/json" -TimeoutSec 30
+    $n = 0
+    foreach ($p in $r.projects) {
+      $n += [int]$p.clean + [int]$p.info + [int]$p.clip + [int]$p.renders
+    }
+    return $n
+  } catch {
+    return -1
   }
+}
 
-  $tail = Get-Content $out -Tail 5 -ErrorAction SilentlyContinue
-  if ($tail) { $tail | ForEach-Object { Say "  > $_" } }
+# Flow 생성이 끝나기를 기다린다. **에이전트 대신 여기서 기다린다.**
+# claude --print 는 한 턴만 돌고 끝나는 모드라, 몇 분짜리 생성 앞에서 모델은
+# "기다리는 중" 한 줄을 남기고 턴을 닫는다(실측: CLEAN 을 걸고 76초 만에 종료,
+# 정작 생성은 그 54초 뒤에 끝났다). 모델이 기다리게 만들려고 싸우지 말고
+# 바깥에서 기다렸다가 다시 깨운다.
+function Wait-FlowIdle([int]$MaxSec = 1500) {
+  $t0 = Get-Date
+  while (((Get-Date) - $t0).TotalSeconds -lt $MaxSec) {
+    try {
+      $j = Invoke-RestMethod -Uri "$api/api/tools/flow_job" -Method Post `
+           -Body '{}' -ContentType "application/json" -TimeoutSec 20
+      if ($j.state -ne "running") { return $true }
+    } catch {
+      return $true   # 조회가 안 되면 기다릴 근거도 없다
+    }
+    Start-Sleep -Seconds 20
+  }
+  Say "Flow 작업이 $MaxSec 초를 넘겨도 안 끝납니다"
+  return $false
+}
+
+$stale = 0
+try {
+  for ($round = 1; $round -le $Rounds; $round++) {
+    if (-not (Wait-FlowIdle)) { break }
+
+    $before = Get-Progress
+
+    Say "라운드 $round/$Rounds — 에이전트를 깨웁니다 (최대 $TimeoutSec 초)"
+    $out = Join-Path $logDir ("run-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".txt")
+
+    # --print: 대화창 없이 한 번 돌고 끝난다.
+    $p = Start-Process -FilePath "claude" `
+      -ArgumentList "--print", "--permission-mode", "acceptEdits" `
+      -WorkingDirectory $root `
+      -RedirectStandardInput (New-TemporaryFile | ForEach-Object { $prompt | Set-Content $_ -Encoding utf8; $_ }) `
+      -RedirectStandardOutput $out `
+      -RedirectStandardError "$out.err" `
+      -NoNewWindow -PassThru
+
+    if (-not $p.WaitForExit($TimeoutSec * 1000)) {
+      Say "시간 초과 — 에이전트를 종료합니다"
+      $p.Kill()
+    }
+
+    $tail = Get-Content $out -Tail 3 -ErrorAction SilentlyContinue
+    if ($tail) { $tail | ForEach-Object { Say "  > $_" } }
+
+    # 진척이 있었나 — **자산과 완성본의 총 개수**로 본다.
+    # pending_jobs 로 재면 안 된다. 그건 대본 쪽 일만 세서, 한 라운드에 자산 32개를
+    # 만들어 놓고도 "제자리" 가 나온다 (실측 2026-09-23 라운드 1).
+    $after = Get-Progress
+    $moved = ($after -lt 0) -or ($before -lt 0) -or ($after -gt $before)
+    if (-not $moved) {
+      try {
+        $j = Invoke-RestMethod -Uri "$api/api/tools/flow_job" -Method Post `
+             -Body '{}' -ContentType "application/json" -TimeoutSec 20
+        if ($j.state -eq "running") { $moved = $true }   # 걸어놓고 나간 것도 진척이다
+      } catch { }
+    }
+    Say ("  진척: 자산+완성본 {0} -> {1}" -f $before, $after)
+
+    if ($moved) {
+      $stale = 0
+    } else {
+      $stale++
+      Say "이 라운드에서 진척이 없습니다 ($stale/2)"
+      if ($stale -ge 2) { Say "두 번 연속 제자리 — 멈춥니다"; break }
+    }
+  }
 } finally {
   Remove-Item $lock -Force -ErrorAction SilentlyContinue
 }

@@ -31,7 +31,11 @@ defmodule VideoTool.Publishing.GoogleOAuth do
   # 스코프는 인증 시점에 토큰에 박히므로 나중에 늘리면 재연결이 필요하다.
   @scopes [
     "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube.force-ssl"
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    # 노출수·시청 지속률을 보려면 이게 있어야 한다. 읽기 전용이다.
+    # **스코프는 토큰에 박힌다** — 이 줄을 넣은 뒤에는 채널마다 한 번씩 다시 연결해야
+    # 새 권한이 붙은 토큰이 내려온다. 기존 토큰은 업로드용으로 계속 돌아간다.
+    "https://www.googleapis.com/auth/yt-analytics.readonly"
   ]
 
   def configured? do

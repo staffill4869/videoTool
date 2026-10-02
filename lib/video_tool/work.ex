@@ -94,7 +94,8 @@ defmodule VideoTool.Work do
       title: project.title,
       topic: project.topic,
       target_sec: project.target_sec,
-      target_chars: round(project.target_sec * project.voice.chars_per_sec),
+      # **대본 길이는 목표가 아니라 영상 길이에 맞춘다.** 실제 영상은 장면 수 × 8초다.
+      target_chars: round(video_sec(project) * project.voice.chars_per_sec),
       chars_per_sec: project.voice.chars_per_sec,
       voice: project.voice.display_name,
       style: project.style.name,
@@ -105,9 +106,11 @@ defmodule VideoTool.Work do
       language_label: Projects.language_label(project.language),
       variant_of_id: project.variant_of_id,
       clip_total_sec: clip_total_sec(project, task),
+      # 읽힐 글. 자막은 대본(숫자) 그대로 쓰고, 음성만 이걸 읽힌다.
+      tts_text: task == "make_narration" && script && (script.tts_text || script.raw_text),
       source: source_material(project, task),
       standing_prompt: standing_prompt(project),
-      instruction: instruction(task)
+      instruction: instruction(task, project)
     }
   end
 
@@ -150,6 +153,11 @@ defmodule VideoTool.Work do
   # (따옴표가 빠져 비문), "살아 남는" (한 단어인데 띄웠다).
   @proofread """
 
+  **말투는 존댓말로 통일합니다.** 문장 끝을 `-습니다 / -입니다 / -합니다` 로 맺습니다.
+  `-이다 / -한다 / -것이다` 같은 평서체를 섞지 마세요 — 편마다 말투가 달라지면
+  같은 채널로 안 보입니다 (실측: 영양제 #43 은 존댓말, #44·#45 는 평서체로 나갔습니다).
+  이 글은 나레이션으로 읽히고 자막으로도 구워지므로, 두 곳 모두 존댓말이 됩니다.
+
   **저장하기 전에 오타를 한 번 훑으세요.** 이 글이 자막으로 그대로 구워집니다.
   - 맞춤법·띄어쓰기: 한 단어는 붙입니다 (살아남다 · 빠져나가다 · 쌓아두다)
   - 의문문은 반드시 ? 로 끝냅니다. 문장 끝 마침표·물음표·느낌표로 자막을 나누므로,
@@ -161,7 +169,31 @@ defmodule VideoTool.Work do
 
   # 마지막 장면을 요약으로 닫으면 사람들이 "그렇구나" 하고 나간다.
   # 질문으로 끝내면 댓글에 자기 경험과 판단을 쓴다 — 그게 노출로 돌아온다.
-  defp instruction("write_script"),
+  # Flow 클립은 무조건 8초다. 그래서 **영상 길이는 장면 수가 정한다** — 목표 초는 참고값이다.
+  #
+  # **7개를 넘기지 않는다.** 예전에는 "장면 8개" 가 지시에 박혀 있어서 어떤 편이든
+  # 64초가 나왔다. 쇼츠에서 1분을 넘으면 넘긴 만큼이 아니라 편 전체가 손해다.
+  # 7개 × 8초 = 56초로, 앞뒤 여유를 두고 1분 안에 들어온다.
+  @clip_sec 8
+  @max_scenes 7
+  @min_scenes 3
+
+  @doc false
+  # 시험용 입구. 장면 수 계산만 떼어 본다.
+  def scene_count_for(target_sec) do
+    (target_sec / @clip_sec) |> round() |> min(@max_scenes) |> max(@min_scenes)
+  end
+
+  defp scene_count(project) do
+    (project.target_sec / @clip_sec)
+    |> round()
+    |> min(@max_scenes)
+    |> max(@min_scenes)
+  end
+
+  defp video_sec(project), do: scene_count(project) * @clip_sec
+
+  defp instruction("write_script", _project),
     do:
       "대본을 써서 save_script(project_id, raw_text) 로 저장하세요. " <>
         "한 장면은 클립 길이(8초)에 맞춰 공백 제외 38~42자로 씁니다 " <>
@@ -176,27 +208,32 @@ defmodule VideoTool.Work do
         "- 예·아니오로 끝나지 않게, 의견이 갈리는 지점을 물을 것 " <>
         "(\"어느 쪽이…\", \"당신이라면…\", \"이건 왜…\")
 " <>
-        "- 구독·좋아요·댓글 요청 문구는 넣지 말 것. 질문 자체가 초대다
+        "- **구독·좋아요 문장은 쓰지 마라.** 합성이 끝에 미리 만들어 둔 " <>
+        "구독 영상(인물이 엄지를 들고 말하는 2~3초)을 자동으로 붙인다 " <>
+        "(Assembly.outro_path). 대본에도 쓰면 구독 요청이 두 번 나간다 — " <>
+        "29초 영상에 5.5초를 구독에 쓴 적이 있다. **질문으로 끝내라**
 " <>
         "- 마지막 장면도 8초짜리다. 짧은 마무리 한 마디 + 질문으로 38~42자를 채울 것
 " <>
         "  예) \"직선은 시간을 아끼려는 계산이었습니다. 지금 우리가 쓰는 길은 " <>
         "무엇을 아끼려고 그렇게 놓였을까요?\"" <> @proofread
 
-  defp instruction("split_scenes"),
+  defp instruction("split_scenes", project),
     do:
       "대본을 장면으로 나눠 save_scenes(project_id, scenes) 로 저장하세요. " <>
-        "장면 8개, 각 target_sec 은 8입니다 — Flow 클립이 8초로 나옵니다. " <>
+        "장면 #{scene_count(project)}개, 각 target_sec 은 8입니다 — Flow 클립이 8초로 나옵니다 " <>
+        "(영상 #{video_sec(project)}초). " <>
         "shot_prompt · info_instruction · camera_plan · expected_labels 를 채우세요. " <>
-        "마지막 장면(purpose: close)의 segment_text 는 질문으로 끝나야 합니다." <> @proofread
+        "마지막 장면(purpose: close)의 segment_text 는 질문으로 끝나야 합니다. " <>
+        "구독 장면은 만들지 마세요 — 합성이 따로 붙입니다." <> @proofread
 
-  defp instruction("translate_script"),
+  defp instruction("translate_script", _project),
     do:
       "원본 대본을 이 언어로 옮겨 save_script(project_id, raw_text) 로 저장하세요. " <>
         "새로 쓰지 마세요 — 같은 영상의 다른 언어판입니다. 화면(CLEAN)은 원본과 같은 그림을 씁니다. " <>
         "estimate_length 로 길이를 확인하세요. 언어마다 글자 수가 달라 길이가 어긋납니다."
 
-  defp instruction("translate_scenes"),
+  defp instruction("translate_scenes", _project),
     do:
       "원본의 장면 구성을 그대로 두고 info_instruction 과 expected_labels 만 이 언어로 옮겨 " <>
         "save_scenes 로 저장하세요. shot_prompt·camera_plan·target_sec 은 원본과 같아야 합니다."
@@ -204,17 +241,20 @@ defmodule VideoTool.Work do
   # **TTS 를 먼저 만들지 않는다.** 영상이 이미 나와 있으므로 그 길이가 곧 정답이다.
   # 대본 60초 목표로 썼는데 클립이 8초씩 나와 120초가 된 적이 있다 — 뒤 53초가 무음이었다.
   # 길이를 아는 지금 대본을 그 길이에 맞춰 다시 쓰고, 그 다음에 음성을 만든다.
-  defp instruction("make_narration"),
+  defp instruction("make_narration", _project),
     do:
       "**먼저 대본 길이를 영상에 맞추세요.** clip_total_sec 이 이번 영상의 실제 길이입니다. " <>
         "지금 대본이 그보다 짧으면 save_script 로 내용을 더 써서 길이를 맞춘 뒤에 음성을 만드세요 " <>
         "(estimate_length 로 확인). 짧은 대본으로 음성을 만들면 뒷부분이 통째로 무음이 됩니다. " <>
+        "**TTS 에는 job 의 tts_text 를 넣으세요** — 대본(raw_text)이 아닙니다. " <>
+        "대본은 자막으로 그대로 구워지므로 숫자(10월 2일)로 두고, " <>
+        "읽을 때만 소리대로(시월 이일) 바뀝니다. 대본에 소리대로 쓰면 자막이 그렇게 나갑니다. " <>
         "길이를 맞췄으면 힉스필드 MCP 로 TTS 를 만들고 그 파일 경로나 URL 을 " <>
         "save_narration(project_id, file) 에 넘기세요. " <>
         "낭독 속도를 올려 길이를 맞추지 마세요 — 글자 수로 맞춥니다. " <>
         "저장이 끝나면 서버가 합성까지 이어서 합니다." <> @proofread
 
-  defp instruction("write_allowed_facts"),
+  defp instruction("write_allowed_facts", _project),
     do:
       "화면에 넣어도 되는 수치·명칭을 save_allowed_facts(project_id, facts) 로 저장하세요. " <>
         "이게 없으면 INFO 단계에서 대본에 없는 숫자가 렌더링됩니다."

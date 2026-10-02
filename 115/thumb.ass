@@ -1,0 +1,16 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: L1,Malgun Gothic,160,&H00FFFFFF,&H00000000,&H00000000,1,1,10,0,8,25,25,60,1
+Style: L2,Malgun Gothic,160,&H0055E7FF,&H00000000,&H00000000,1,1,10,0,8,25,25,275,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:10.00,L1,,0,0,0,,비타민C 많이
+Dialogue: 0,0:00:00.00,0:00:10.00,L2,,0,0,0,,그냥 소변행

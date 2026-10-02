@@ -206,10 +206,30 @@ async function status(browser, cfg) {
     }
   }
 
+  // 홈(목록) 화면은 로그인 여부와 무관하게 landing 이다. 입력칸이 없다는 것만으로
+  // "로그인 필요" 라고 하면 멀쩡한 상태에서 사람을 부르게 된다(실측 2026-09-28).
+  // 로그인 버튼이 보이면 안 된 것, 계정 사진이 있으면 된 것. 둘 다 아니면 모른다(null).
+  let signedIn = null;
+  if (kind === "landing") {
+    try {
+      signedIn = await page.evaluate(() => {
+        const signIn = [...document.querySelectorAll("a,button")].some(
+          (e) => e.offsetParent !== null && /^(sign in|로그인)$/i.test(e.innerText.trim())
+        );
+        if (signIn) return false;
+        return document.querySelector('img[src*="googleusercontent"]') ? true : null;
+      });
+    } catch {
+      /* 판단 못 하면 null 로 둔다 */
+    }
+  }
+
   const hints = {
     login: "구글 로그인 화면입니다. 사람이 직접 로그인하세요 — 자동화는 로그인하지 않습니다.",
     landing:
-      "Flow 소개·목록 화면입니다. 입력칸이 없는 게 정상입니다. new_project 로 편집기를 여세요 — 사람이 열 필요 없습니다.",
+      signedIn === false
+        ? "Flow 에 로그인돼 있지 않습니다. 사람이 직접 로그인하세요 — 자동화는 로그인하지 않습니다."
+        : "Flow 소개·목록 화면입니다. 입력칸이 없는 게 정상입니다. new_project 로 편집기를 여세요 — 사람이 열 필요 없습니다.",
     other: "Flow 페이지가 아닙니다.",
     editor: promptBox ? null : "편집기인데 입력칸을 못 찾았습니다. selectors.json 의 promptBox 후보를 고치세요."
   };
@@ -221,6 +241,7 @@ async function status(browser, cfg) {
     page: kind,
     url: page.url(),
     prompt_box: promptBox,
+    signed_in: signedIn,
     hint: hints[kind]
   };
 }

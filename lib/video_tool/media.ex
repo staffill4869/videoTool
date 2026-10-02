@@ -185,7 +185,7 @@ defmodule VideoTool.Media do
   "1번 장면에는 지금 8번에 있는 그림을 써라" 는 뜻 — 콘택트 시트를 보면서 읽는 순서 그대로다.
   """
   def remap_scenes(project_id, kind, order) do
-    assets = list_assets(project_id, kind) |> Enum.filter(& &1.scene_id)
+    assets = list_assets(project_id, kind) |> Enum.filter(& &1.scene_id) |> dedupe_per_scene()
     by_no = Map.new(assets, &{&1.scene.scene_no, &1})
     scenes = Map.new(assets, &{&1.scene.scene_no, &1.scene_id})
     n = map_size(by_no)
@@ -222,6 +222,23 @@ defmodule VideoTool.Media do
 
         {:ok, %{moved: Enum.count(Enum.with_index(order, 1), fn {f, t} -> f != t end), scenes: n}}
     end
+  end
+
+  # 한 장면에 자산이 여러 개 붙은 경우(중복 harvest 등) remap 전에 정리한다.
+  # contact_sheet 가 칸을 고르는 것과 같은 기준(order_confidence 최댓값)으로 하나만 남기고
+  # 나머지는 scene_id 를 뗀다 — 파일은 지우지 않는다.
+  defp dedupe_per_scene(assets) do
+    assets
+    |> Enum.group_by(& &1.scene_id)
+    |> Enum.map(fn
+      {_scene_id, [one]} ->
+        one
+
+      {_scene_id, many} ->
+        [keep | drop] = Enum.sort_by(many, & &1.order_confidence, :desc)
+        Enum.each(drop, &Repo.update!(Ecto.Changeset.change(&1, scene_id: nil)))
+        keep
+    end)
   end
 
   @doc "단계별 개수. next/1 이 어디까지 왔는지 판단하는 근거."

@@ -27,6 +27,9 @@ defmodule VideoTool.Publishing.Channel do
     field :max_duration_sec, :integer, default: 0
     field :is_active, :boolean, default: true
 
+    # 올린 뒤 채널 이름으로 남기는 첫 댓글. 비워 두면 upload.ex 의 기본 문구가 나간다.
+    field :first_comment, :string, default: ""
+
     # 어느 시리즈의 어느 칸인가. 시리즈마다 본채널·쇼츠 두 칸이다.
     field :series_id, :integer
     field :kind, :string, default: "main"
@@ -47,7 +50,7 @@ defmodule VideoTool.Publishing.Channel do
     |> cast(attrs, ~w(platform slug display_name account_id credential_ref token_expires_at
                       default_privacy default_category default_language title_pattern
                       description_pattern default_hashtags aspect_required max_duration_sec
-                      is_active series_id kind)a)
+                      is_active series_id kind first_comment)a)
     |> validate_inclusion(:kind, @kinds)
     |> validate_required([:platform, :slug, :display_name])
     |> validate_inclusion(:platform, @platforms)
@@ -240,6 +243,7 @@ defmodule VideoTool.Publishing do
       project_id: project.id,
       channel_id: channel.id,
       render_id: render.id,
+      # 새 행에만 쓴다 — 아래 changeset 에서 기존 행이면 지운다.
       status: "draft",
       title: title,
       description: description,
@@ -260,8 +264,17 @@ defmodule VideoTool.Publishing do
 
     changeset =
       case existing do
-        nil -> Publication.changeset(%Publication{}, params)
-        row -> Publication.changeset(row, params)
+        nil ->
+          Publication.changeset(%Publication{}, params)
+
+        # 이미 있는 행의 status 는 건드리지 않는다.
+        #
+        # 2026-09-23: 에이전트가 발행이 끝난 행에 제목을 다시 저장했다. status 가
+        # "published" → "draft" 로 되돌아가면서 `already_published?` 가 풀렸고,
+        # 같은 영상이 다시 올라갔다 (그리고 유튜브 일일 한도에 걸려 failed 로 남았다).
+        # 남은 증거: 32번 행은 status=draft 인데 external_id·published_at 이 차 있다.
+        row ->
+          Publication.changeset(row, Map.delete(params, :status))
       end
 
     with {:ok, publication} <- Repo.insert_or_update(changeset) do
@@ -301,12 +314,42 @@ defmodule VideoTool.Publishing do
       {channel.max_duration_sec == 0 or render.duration_sec <= channel.max_duration_sec,
        "길이 #{Float.round(render.duration_sec, 1)}초가 채널 상한 #{channel.max_duration_sec}초를 넘습니다"},
       {not already_published?(project, channel, render),
-       "같은 렌더가 이미 이 채널에 발행됐습니다 (중복 발행 차단)"}
+       "같은 렌더가 이미 이 채널에 발행됐습니다 (중복 발행 차단)"},
+      {under_daily_cap?(channel),
+       "오늘 이 채널에 이미 #{uploaded_today(channel)}편을 올렸습니다 " <>
+         "(하루 상한 #{daily_cap()}편). 내일 다시 하거나 상한을 올리세요 " <>
+         "— DAILY_PUBLISH_CAP 환경변수"},
+      {thumbnail_ready?(render),
+       "섬네일이 없습니다. make_thumbnail(project_id, line1, line2) 로 먼저 만드세요 " <>
+         "— 없으면 유튜브가 영상 중간 프레임을 멋대로 골라 씁니다"}
     ]
 
     case Enum.reject(checks, fn {ok, _} -> ok end) do
       [] -> :ok
       failures -> {:error, Enum.map(failures, fn {_, msg} -> msg end)}
+    end
+  end
+
+  # **섬네일 없이는 발행하지 않는다.**
+  #
+  # 무인 루프 지시문에 섬네일 단계를 적어 뒀지만 지시는 건너뛸 수 있다 —
+  # 실제로 2026-09-30 까지 올라간 23편 중 18편에 섬네일이 없었거나
+  # 엉뚱한 그림(연락지 격자)이 올라가 있었다. 되돌리기 어려운 공개 행위이므로
+  # 여기서 막는다.
+  #
+  # 이름이 아니라 **비율**을 본다. `thumb.jpg` 라는 이름만 맞고 내용이 다른 파일이
+  # 그대로 올라간 적이 있다. compose 는 1280x720 으로만 만든다.
+  defp thumbnail_ready?(render) do
+    path =
+      if is_binary(render.thumbnail_path) and render.thumbnail_path != "",
+        do: render.thumbnail_path
+
+    with p when is_binary(p) <- path,
+         true <- File.exists?(p),
+         {:ok, %{width: w, height: h}} when w > 0 and h > 0 <- VideoTool.Ffmpeg.probe(p) do
+      abs(w / h - 16 / 9) < 0.1
+    else
+      _ -> false
     end
   end
 
@@ -332,13 +375,95 @@ defmodule VideoTool.Publishing do
   defp resolve_privacy(%Channel{default_privacy: "private"}, _asked), do: "private"
   defp resolve_privacy(channel, asked), do: asked || channel.default_privacy
 
+  # status 가 아니라 **영상 id 가 있으면** 이미 올라간 것이다. status 는 나중 단계가
+  # 덮어쓸 수 있지만(위 save_publish_meta 사고, 그리고 실패 기록), external_id 는
+  # 유튜브가 실제로 영상을 만들었다는 증거다. 되돌릴 수 없는 행위라 넓게 막는다.
   defp already_published?(project, channel, render) do
     Repo.exists?(
       from p in Publication,
         where:
           p.project_id == ^project.id and p.channel_id == ^channel.id and
-            p.render_id == ^render.id and p.status == "published"
+            p.render_id == ^render.id and
+            (p.status == "published" or p.external_id != "")
     )
+  end
+
+  # 하루에 이 채널로 몇 편까지 올릴지.
+  #
+  # 왜 필요한가 (실측 2026-09-23): 무인 루프가 같은 주제로 여러 편을 만들어
+  # 한 채널에 8편을 올렸다. 유튜브 일일 한도에도 걸렸다
+  # ("The user has exceeded the number of videos they may upload").
+  # `already_published?` 는 **같은 렌더**만 막아서, 새 프로젝트면 그냥 통과한다.
+  # **0 = 우리는 안 막는다.** 유튜브가 직접 막고, 그게 더 정확하다.
+  #
+  # 예전에는 API 할당량(하루 10,000 유닛 ÷ 1,600 = 6편)을 근거로 6편에서 끊었다.
+  # 실측으로 틀린 것이 드러났다 — 2026-09-29 하루에 세 채널 각 6편, 총 18편
+  # (28,800 유닛)이 전부 올라갔다. 할당량은 실제 벽이 아니다.
+  #
+  # 진짜 벽은 계정 업로드 한도다. 넘기면 유튜브가 400 을 준다:
+  # "The user has exceeded the number of videos they may upload."
+  # 계정을 막지는 않는다. 그 건만 failed 로 남고 다른 채널은 그대로 간다.
+  # 업로드는 retry: false 라 한 번 거절되면 멈춘다 — 두들기지 않는다.
+  #
+  # **그래서 상한을 0(무제한)으로 풀었는데, 그게 틀렸다.**
+  # 유튜브는 업로드를 거절하지 않고 **노출을 끊는다.** 실측(2026-09-30, 영양제 채널):
+  #
+  #   1번 00:41  1,310회      6번 12:42  1,226회
+  #   2번 09:00  1,253회      ─── 7번째부터 ───
+  #   3번 09:01    358회      7번 15:29     10회
+  #   4번 09:01  1,390회      8번 15:59     10회
+  #   5번 09:44    518회      …  15번 23:48   0회
+  #
+  # 중간이 없다. 6번째까지는 1,200회대도 나오고 7번째부터는 한 자릿수다.
+  # 같은 날 지원사업 채널은 9편을 올리고도 멀쩡했으니(오히려 역대 최고)
+  # 계정이 아니라 **채널마다 감당 가능한 양이 다르다.**
+  #
+  # 400 을 안 받았다고 괜찮은 게 아니다. 거절은 눈에 보이지만 노출 차단은
+  # 조회수를 봐야 보인다 — 하루를 통째로 날린 뒤에야 알았다.
+  @daily_cap_default 5
+
+  @doc "하루 상한값. 0 이면 상한 없음."
+  def daily_cap, do: Application.get_env(:video_tool, :daily_publish_cap, @daily_cap_default)
+
+  @doc """
+  오늘 이 채널에 올라간 편 수. **status 가 아니라 external_id 로 센다.**
+
+  업로드는 성공했는데 뒤 단계(섬네일 등)가 실패해 `failed` 로 남은 행이 있다.
+  유튜브는 그것도 업로드로 세므로 우리도 세야 한다 — status 로만 세면
+  실패 기록을 보고 "아직 안 올렸네" 하며 또 올린다(2026-09-23 사고).
+  """
+  def uploaded_today(channel), do: count_uploaded_today(channel)
+
+  # 0 은 "상한 없음" 이다. 그 경우 세지도 않는다 — 켜 두면 안 되지만, 막는 쪽이
+  # 기본값이라 끄는 방법은 있어야 한다.
+  def under_daily_cap?(channel) do
+    case daily_cap() do
+      0 -> true
+      n -> uploaded_today(channel) < n
+    end
+  end
+
+  # 날짜는 UTC 기준이다. 유튜브의 한도 기준(태평양시)과 정확히 같지는 않지만,
+  # 여기 목적은 폭주를 막는 것이지 유튜브 한도를 흉내내는 게 아니다.
+  # **`published_at` 으로 센다. `updated_at` 이 아니다.**
+  #
+  # 처음엔 updated_at 으로 셌는데, 그 값은 제목만 다시 저장해도 올라간다.
+  # 9/23 에 올린 편 세 개를 에이전트가 오늘 save_publish_meta 로 건드리자
+  # 그것들이 "오늘 올린 것" 으로 잡혀, 실제로는 네 편만 올렸는데 상한 6 에
+  # 걸려 루프가 멈췄다(2026-09-28 실측).
+  #
+  # published_at 은 업로드가 성공한 그 순간에만 찍힌다.
+  defp count_uploaded_today(channel) do
+    today = Date.utc_today()
+
+    Repo.one(
+      from p in Publication,
+        where:
+          p.channel_id == ^channel.id and p.external_id != "" and
+            not is_nil(p.published_at) and
+            fragment("(? AT TIME ZONE 'UTC')::date", p.published_at) == ^today,
+        select: count(p.id)
+    ) || 0
   end
 
   @doc """
@@ -386,6 +511,8 @@ defmodule VideoTool.Publishing do
             error: ""
           })
 
+        {:ok, _} = VideoTool.Projects.sync_status(project.id)
+
         {:ok,
          %{
            publication_id: updated.id,
@@ -394,7 +521,9 @@ defmodule VideoTool.Publishing do
            steps: %{
              upload: "ok",
              thumbnail: step(result.thumbnail),
-             captions: step(result.captions)
+             captions: step(result.captions),
+             comment: step(result.comment),
+             like: step(result.like)
            }
          }}
 
@@ -416,6 +545,40 @@ defmodule VideoTool.Publishing do
 
       other ->
         {:error, "모르는 플랫폼: #{other}"}
+    end
+  end
+
+  @doc """
+  이미 올라간 영상에 섬네일만 올린다 (50유닛).
+
+  발행 뒤에 섬네일을 만든 편을 되살리려고 만들었다. 섬네일이 없으면 유튜브가
+  영상 중간 프레임을 멋대로 골라 쓴다.
+  """
+  def upload_thumbnail(publication_id) do
+    case Repo.get(Publication, publication_id) do
+      nil ->
+        {:error, "발행물 #{publication_id} 이 없습니다."}
+
+      pub ->
+        pub = Repo.preload(pub, [:channel, :render])
+
+        cond do
+          pub.external_id == "" ->
+            {:error, "아직 유튜브에 올라가지 않은 발행물입니다."}
+
+          is_nil(pub.render) ->
+            {:error, "완성본이 연결돼 있지 않습니다."}
+
+          true ->
+            case VideoTool.YouTube.Upload.set_thumbnail(pub, pub.channel, pub.render) do
+              {:ok, _} ->
+                {:ok, _} = mark(pub, %{thumbnail_uploaded: true})
+                {:ok, %{publication_id: pub.id, video_id: pub.external_id}}
+
+              {:error, reason} ->
+                {:error, to_string(reason)}
+            end
+        end
     end
   end
 

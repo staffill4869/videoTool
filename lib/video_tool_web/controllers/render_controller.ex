@@ -14,7 +14,7 @@ defmodule VideoToolWeb.RenderController do
     with {:ok, render} <- fetch(id),
          {:ok, path} <- pick_file(render, params["variant"]),
          :ok <- inside_work_root(path) do
-      serve(conn, path)
+      serve(conn, path, params["as"])
     else
       {:error, reason} -> conn |> put_status(404) |> text(reason)
     end
@@ -35,6 +35,23 @@ defmodule VideoToolWeb.RenderController do
     end
   end
 
+  # variant=thumb 면 유튜브에 올라가는 섬네일 그림을 준다.
+  # 화면에서 "무엇이 걸릴지" 를 보려면 영상이 아니라 이 파일을 봐야 한다 —
+  # 2026-09-30 에 898x786 짜리 연락지 격자가 섬네일로 18편 올라간 걸
+  # 유튜브 채널을 눈으로 보고서야 알았다.
+  defp pick_file(render, "thumb") do
+    case render.thumbnail_path do
+      p when is_binary(p) and p != "" -> exists(p)
+      _ -> {:error, "섬네일이 붙어 있지 않습니다"}
+    end
+  end
+
+  # variant=thumb916 은 쇼츠 세로 타일용 짝이다. 유튜브 API 로는 못 올리는 자리라
+  # 화면에서 받아 스튜디오에 손으로 넣는다.
+  defp pick_file(render, "thumb916") do
+    exists(Path.join(Path.dirname(render.thumbnail_path || ""), "thumb916.jpg"))
+  end
+
   defp pick_file(render, _), do: exists(render.file_path)
 
   defp exists(path), do: if(File.exists?(path), do: {:ok, path}, else: {:error, "파일이 없습니다"})
@@ -50,7 +67,11 @@ defmodule VideoToolWeb.RenderController do
     end
   end
 
-  defp serve(conn, path) do
+  # `as=<파일명>` 이 붙으면 **내려받기**로 준다.
+  # `<a download>` 만으로는 안 되는 경우가 있다 — 브라우저가 그림을 새 탭에서 열어 버리면
+  # 사용자가 다시 "이미지 저장" 을 눌러야 하고, 그러면 파일명이 임의로 붙는다.
+  # 스튜디오에서 영상과 짝을 맞추려면 **파일명에 영상 id 가 박혀 있어야** 한다.
+  defp serve(conn, path, as) do
     size = File.stat!(path).size
 
     conn =
@@ -58,6 +79,7 @@ defmodule VideoToolWeb.RenderController do
       |> put_resp_header("content-type", content_type(path))
       |> put_resp_header("accept-ranges", "bytes")
       |> put_resp_header("cache-control", "private, max-age=60")
+      |> disposition(as)
 
     case range(conn, size) do
       nil ->
@@ -71,6 +93,14 @@ defmodule VideoToolWeb.RenderController do
   end
 
   # 여러 구간을 한 번에 요청하는 경우는 다루지 않는다. 브라우저는 한 구간만 쓴다.
+  defp disposition(conn, as) when is_binary(as) and as != "" do
+    # 경로 조작을 막는다 — 파일명에 / 나 .. 가 들어오면 안 된다.
+    name = as |> Path.basename() |> String.replace(~r/[^\w.\-가-힣\[\] ]/u, "_")
+    put_resp_header(conn, "content-disposition", ~s(attachment; filename="#{name}"))
+  end
+
+  defp disposition(conn, _), do: conn
+
   defp range(conn, size) do
     with [value] <- get_req_header(conn, "range"),
          %{"from" => from_s, "to" => to_s} <-
@@ -103,6 +133,9 @@ defmodule VideoToolWeb.RenderController do
       ".mov" -> "video/quicktime"
       ".wav" -> "audio/wav"
       ".mp3" -> "audio/mpeg"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".png" -> "image/png"
       _ -> "application/octet-stream"
     end
   end

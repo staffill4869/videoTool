@@ -100,6 +100,12 @@ defmodule VideoTool.MCP do
         ["project_id", "stage"]
       ),
       tool(
+        "get_prompt_template",
+        "활성 프롬프트 템플릿 원문. 프로젝트 없이, 변수 치환 없이 그대로 준다",
+        %{"stage" => str("clean | info | video | tts | agent")},
+        ["stage"]
+      ),
+      tool(
         "report_flow_credits",
         "Flow 는 API 가 없어 화면에서 읽은 크레딧을 수동 입력한다",
         %{"project_id" => int("프로젝트 id"), "credits" => num("크레딧")},
@@ -107,6 +113,13 @@ defmodule VideoTool.MCP do
       ),
       tool("cost_report", "프로젝트 비용 집계", %{"project_id" => int("프로젝트 id")}, ["project_id"]),
       tool("list_channels", "발행 대상 채널과 토큰 상태", %{}),
+      tool(
+        "upload_thumbnail",
+        "**이미 올라간 영상에 섬네일만 붙인다** (50유닛). 발행 뒤에 섬네일을 만들었거나 " <>
+          "발행 때 섬네일 올리기가 실패한 편을 되살릴 때 쓴다. 영상을 다시 올리지 않는다",
+        %{"publication_id" => int("발행물 id")},
+        ["publication_id"]
+      ),
       tool(
         "save_publish_meta",
         "제목·설명·해시태그를 저장만 한다. 발행하지 않는다",
@@ -200,6 +213,18 @@ defmodule VideoTool.MCP do
           "file" => str("이미지 경로 또는 http(s) URL")
         },
         ["project_id", "file"]
+      ),
+      tool(
+        "make_thumbnail",
+        "본편 그림으로 섬네일을 직접 만들어 붙인다. 1번 장면 INFO 이미지 위에 검은 띠를 깔고 " <>
+          "큰 글자 두 줄을 얹는다 — 따로 그리지 않으므로 값이 0 이고 화풍이 본편과 같다. " <>
+          "line1 은 흰색(주제), line2 는 노란색(숫자)으로 나온다. 각 줄 7~9글자를 넘기지 마라",
+        %{
+          "project_id" => int("프로젝트 id"),
+          "line1" => str("윗줄 — 흰색. 무엇에 대한 이야기인지 (예: 통근버스 임차비)"),
+          "line2" => str("아랫줄 — 노란색. 숫자나 마감 (예: 월 250만 원)")
+        },
+        ["project_id", "line1"]
       ),
       tool(
         "assemble",
@@ -339,15 +364,35 @@ defmodule VideoTool.MCP do
         %{}
       ),
       tool("work_summary", "대기 중인 일이 몇 건인지, 시리즈가 몇 개 도는지", %{}),
-      tool("list_series", "반복 제작 설정 목록", %{}),
+      tool(
+        "list_series",
+        "반복 제작 설정 목록. **오래 못 나간 시리즈가 맨 위다** (`starved_hours` 내림차순) — " <>
+          "새 편을 만들 때는 맨 위부터 고른다. 그래야 한 시리즈만 계속 나가지 않는다",
+        %{}
+      ),
+      tool(
+        "list_grants",
+        "기업마당 지원사업 공고 목록. **영상 주제를 여기서 고를 수 있다** — " <>
+          "고른 뒤 run_series(topic:) 나 create_project 의 주제로 넣는다. " <>
+          "금액·자격은 요약에 없는 게 많으니 attachment(첨부 공고문)를 확인하고 " <>
+          "save_allowed_facts 에 넣어라 — 요약만 보고 숫자를 쓰면 지어낸 값이 나간다",
+        %{
+          "limit" => int("받을 건수 (기본 20)"),
+          "query" => str("제목·요약·기관·해시태그에 이 말이 든 것만 (예: 수출, 청년, 제조)")
+        }
+      ),
       tool(
         "run_series",
         "시리즈로 프로젝트를 지금 하나 만든다 (간격을 기다리지 않고)",
         %{
           "series_id" => int("시리즈 id"),
-          "topic" => str("이번 편 주제. 생략하면 시리즈 기본 주제")
+          "topic" =>
+            str(
+              "**이번 편** 주제 한 줄. 시리즈 기본 주제(설명문)를 그대로 넣지 마라 — " <>
+                "이미 만든 주제와 같으면 거부된다. 무엇이 이미 있는지는 list_series 의 recent 를 본다"
+            )
         },
-        ["series_id"]
+        ["series_id", "topic"]
       ),
       tool(
         "create_language_variant",
@@ -443,6 +488,19 @@ defmodule VideoTool.MCP do
     handle(name, args || %{})
   rescue
     e -> %{ok: false, error: "#{name} 실행 중 오류: #{Exception.message(e)}"}
+  end
+
+  # 활성 템플릿 원문을 그대로 준다. `render_prompt` 와 다른 점은 **프로젝트가 필요 없고
+  # 변수 치환도 안 한다**는 것이다. 무인 루프가 자기 지시문(stage: "agent")을
+  # 화면에서 고친 대로 읽어가는 데 쓴다.
+  defp handle("get_prompt_template", args) do
+    case Presets.fetch_template(args["stage"] || "") do
+      {:ok, t} ->
+        %{ok: true, stage: t.stage, version: t.version, body: t.body, chars: String.length(t.body)}
+
+      {:error, reason} ->
+        %{ok: false, error: reason}
+    end
   end
 
   defp handle("list_presets", args) do
@@ -751,7 +809,13 @@ defmodule VideoTool.MCP do
         scenes = length(Projects.scenes(p.id))
         done = (counts["clean"] || 0) + (counts["info"] || 0) + (counts["clip"] || 0)
         # 한 번도 안 나간 시리즈가 제일 급하다.
-        starved = starved_hours(last_pub[p.series_id], now)
+        #
+        # **시리즈가 없는 편은 맨 뒤로 보낸다.** `starved_hours(nil, _)` 는 9,999 를
+        # 돌려주는데, 시리즈가 없으면 `last_pub[nil]` 도 nil 이라 그 값이 걸린다 —
+        # 옛 실험 프로젝트 8개가 "제일 굶은 것" 으로 대기열 맨 위를 차지했고,
+        # 그 뒤에 만든 지원사업 편이 영영 차례를 못 받았다 (실측 2026-09-30).
+        # 시리즈에 속하지 않은 편은 반복 제작의 대상이 아니다.
+        starved = if p.series_id, do: starved_hours(last_pub[p.series_id], now), else: -1
 
         %{
           id: p.id,
@@ -785,9 +849,52 @@ defmodule VideoTool.MCP do
 
   defp handle("work_summary", _args), do: Map.merge(%{ok: true}, Work.summary())
 
+  defp handle("list_grants", args) do
+    opts =
+      [limit: args["limit"] || 20]
+      |> then(fn o -> if args["query"], do: [{:query, args["query"]} | o], else: o end)
+
+    case VideoTool.Grants.list(opts) do
+      {:ok, rows} ->
+        %{
+          ok: true,
+          grants: rows,
+          count: length(rows),
+          note:
+            "주제로 쓸 한 건을 고르세요. 금액·기간·자격은 attachment(첨부 공고문)를 열어 " <>
+              "확인한 뒤 save_allowed_facts 에 넣으세요 — summary 에는 대부분 안 들어 있습니다."
+        }
+
+      {:error, reason} ->
+        %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  # **오래 못 나간 시리즈를 맨 위에 둔다.** 순서가 곧 지시다.
+  #
+  # 예전에는 id 순으로 내줬다. 무인 루프 지시문에는 "list_series 로 시리즈를 보고
+  # 새 편을 만든다" 라고만 적혀 있어서 에이전트는 맨 위(id 가 작은 영양제)를 계속 집었고,
+  # 지원사업은 02:19 을 끝으로 네 시간 넘게 안 나갔다 (실측 2026-09-30: #44·#45·#46 이
+  # 연달아 영양제였다). 고르라고 해 놓고 **고를 근거를 안 준 게 원인**이다.
+  defp handle("upload_thumbnail", args) do
+    case Publishing.upload_thumbnail(args["publication_id"]) do
+      {:ok, result} -> Map.merge(%{ok: true}, result)
+      {:error, reason} -> %{ok: false, error: to_string(reason)}
+    end
+  end
+
   defp handle("list_series", _args) do
+    last_pub = Series.last_published_by_series()
+    now = DateTime.utc_now()
+
     series =
-      Enum.map(Series.list(), fn s ->
+      Series.list()
+      # **쉬는 시리즈는 아예 안 보여준다.** 지시문에 "이건 만들지 마라" 고 적어 두면
+      # 건너뛴다 — 오늘 여러 번 겪었다. 목록에서 빼는 게 확실하다.
+      # 채널을 쉬게 할 때는 `active` 를 끄면 된다 (스케줄러는 interval_minutes 가 0 이라
+      # 어차피 안 돈다 — 이 칸은 에이전트에게 보일지만 정한다).
+      |> Enum.filter(& &1.active)
+      |> Enum.map(fn s ->
         %{
           id: s.id,
           name: s.name,
@@ -795,21 +902,42 @@ defmodule VideoTool.MCP do
           interval_minutes: s.interval_minutes,
           languages: s.languages,
           created_count: s.created_count,
+          # 마지막으로 이 시리즈가 발행된 지 몇 시간 지났나. 큰 쪽이 밀린 쪽이다.
+          starved_hours: starved_hours(last_pub[s.id], now),
+          last_published_at: last_pub[s.id],
+          # 새 편 주제를 고르기 전에 무엇이 이미 있는지 봐야 한다.
+          # list_projects 로는 안 보인다 — 거기는 안 끝난 편만 내준다.
+          recent: Enum.map(Series.used_topics(s.id, 12), fn {t, u} -> %{title: t, topic: u} end),
           pending: Series.pending_count(s.id),
           next_run_at: s.next_run_at,
           last_error: s.last_error
         }
       end)
+      |> Enum.sort_by(& &1.starved_hours, :desc)
 
     %{ok: true, series: series}
   end
 
   defp handle("run_series", args) do
-    with {:ok, series} <- Series.get(args["series_id"]),
-         {:ok, project} <- Series.spawn_project(series, topic: args["topic"]) do
-      %{ok: true, project_id: project.id, title: project.title, status: project.status}
-    else
-      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    case Series.get(args["series_id"]) do
+      {:error, reason} ->
+        %{ok: false, error: inspect_error(reason)}
+
+      {:ok, series} ->
+        case Series.spawn_project(series, topic: args["topic"]) do
+          {:ok, project} ->
+            %{ok: true, project_id: project.id, title: project.title, status: project.status}
+
+          {:error, reason} ->
+            # 거절만 하면 에이전트는 무엇을 피해야 하는지 모른 채 같은 주제를 다시 시도한다.
+            # 이미 만든 편을 같이 돌려줘야 한 턴 안에 다른 주제를 고른다.
+            %{
+              ok: false,
+              error: inspect_error(reason),
+              already_made:
+                Enum.map(Series.used_topics(series.id), fn {t, u} -> %{title: t, topic: u} end)
+            }
+        end
     end
   end
 
@@ -1014,7 +1142,7 @@ defmodule VideoTool.MCP do
          # 프로젝트를 스스로 연다. 여기서 prompt_box 를 요구하면 크롬을 새로 띄운
          # 직후처럼 홈 화면일 때 시작조차 못 한다. 붙을 수 있고 로그인돼 있으면 된다.
          {:ok, %{connected: true, page: page}} when page != "login" <- Flow.status(),
-         {:ok, job} <- Flow.run_stage_async(project, stage, text, length(want)) do
+         {:ok, job} <- Flow.run_stage_async(project, stage, text, length(want), want) do
       %{
         ok: true,
         job_id: job.id,
@@ -1083,7 +1211,17 @@ defmodule VideoTool.MCP do
           cond do
             ready -> "준비됐습니다. set_pipeline(pipeline: \"flow_auto\") 로 켜세요."
             status[:flow_tab] != true -> "Chrome 에서 Flow 탭을 열어두세요."
-            true -> "Flow 에 구글 로그인이 필요합니다. 사람이 직접 로그인하세요."
+            # 홈·소개 화면은 입력칸이 없는 게 정상이다. 로그인 버튼이 보일 때만 사람을 부른다.
+            status[:page] == "login" or status[:signed_in] == false ->
+              "Flow 에 구글 로그인이 필요합니다. 사람이 직접 로그인하세요."
+
+            status[:page] == "landing" ->
+              "Flow 홈 화면입니다(로그인됨). flow_new_project(project_id) 로 편집기를 여세요 — 사람이 열 필요 없습니다."
+
+            status[:page] == "editor" ->
+              "편집기인데 입력칸을 못 찾았습니다. priv/flow_driver/selectors.json 의 promptBox 를 보세요."
+
+            true -> "Flow 페이지가 아닙니다. flow_new_project(project_id) 로 여세요."
           end
         )
 
@@ -1165,6 +1303,17 @@ defmodule VideoTool.MCP do
   defp handle("thumbnail_brief", args) do
     with {:ok, project} <- Projects.get_project(args["project_id"]) do
       %{ok: true, project_id: project.id, brief: VideoTool.Thumbnail.brief(project)}
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle("make_thumbnail", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]),
+         {:ok, file} <-
+           VideoTool.Thumbnail.compose(project, args["line1"], args["line2"] || ""),
+         {:ok, result} <- VideoTool.Thumbnail.save(project, file) do
+      result |> Map.put(:ok, true) |> Map.put(:file, file)
     else
       {:error, reason} -> %{ok: false, error: inspect_error(reason)}
     end

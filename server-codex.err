@@ -1,0 +1,8 @@
+** (ArgumentError) errors were found at the given arguments:
+
+  * 1st argument: the table identifier does not refer to an existing ETS table
+
+    (stdlib 8.1) :ets.lookup(Mix.State, :debug)
+    (mix 1.20.2) lib/mix/state.ex:30: Mix.State.get/2
+    (mix 1.20.2) lib/mix/cli.ex:134: Mix.CLI.run_task/2
+    c:/Users/pract/scoop/apps/elixir/current/bin/mix:7: (file)

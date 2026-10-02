@@ -25,25 +25,20 @@ defmodule VideoToolWeb.DashboardLive do
     )
   end
 
-  # ── 이벤트 ──────────────────────────────────────────────────────
+  # 언제 쟀는지. 정확한 시각보다 "얼마나 묵었나" 가 판단에 쓰인다.
+  defp when_measured(nil), do: "—"
 
-  @impl true
-  def handle_event("record", params, socket) do
-    attrs = %{
-      views: to_int(params["views"]),
-      likes: to_int(params["likes"]),
-      comments: to_int(params["comments"]),
-      shares: to_int(params["shares"]),
-      source: "manual",
-      note: params["note"] || ""
-    }
-
-    case Insights.record(String.to_integer(params["publication_id"]), attrs) do
-      {:ok, _} -> {:noreply, socket |> put_flash(:info, "기록했습니다") |> load()}
-      {:error, _} -> {:noreply, put_flash(socket, :error, "기록하지 못했습니다")}
+  defp when_measured(at) do
+    case DateTime.diff(DateTime.utc_now(), at, :minute) do
+      m when m < 60 -> "#{m}분 전"
+      m when m < 1440 -> "#{div(m, 60)}시간 전"
+      m -> "#{div(m, 1440)}일 전"
     end
   end
 
+  # ── 이벤트 ──────────────────────────────────────────────────────
+
+  @impl true
   def handle_event("collect", _params, socket) do
     case Insights.collect_youtube() do
       {:ok, result} ->
@@ -81,15 +76,6 @@ defmodule VideoToolWeb.DashboardLive do
     end
   end
 
-  defp to_int(nil), do: 0
-
-  defp to_int(value) do
-    case Integer.parse(to_string(value)) do
-      {n, _} -> n
-      :error -> 0
-    end
-  end
-
   # ── 화면 ────────────────────────────────────────────────────────
 
   @impl true
@@ -99,7 +85,7 @@ defmodule VideoToolWeb.DashboardLive do
       <.header>
         성과
         <:subtitle>
-          발행물마다 가장 최근 측정치로 합산한다. 자동 수집은 OAuth 가 붙은 뒤다 — 지금은 손으로 넣는다.
+          발행물마다 가장 최근 측정치로 합산한다. 「유튜브에서 수집」 을 누르면 API 키로 긁어 온다 — 손으로 넣을 필요가 없다.
         </:subtitle>
         <:actions>
           <.button
@@ -191,36 +177,44 @@ defmodule VideoToolWeb.DashboardLive do
       </div>
 
       <div :if={@publications != []} class="mt-8">
-        <h2 class="mb-2 text-lg font-semibold">성과 입력</h2>
+        <h2 class="mb-2 text-lg font-semibold">발행물별</h2>
         <p class="mb-2 text-sm text-base-content/60">
-          플랫폼 화면의 숫자를 그대로 넣는다. 잴 때마다 새 줄로 쌓여서 증가 추이가 남는다.
+          「유튜브에서 수집」 을 누르면 여기가 채워진다. 잴 때마다 새 줄로 쌓여서 증가 추이가 남는다.
         </p>
 
-        <form :for={p <- @publications} phx-submit="record" class="mb-2 flex flex-wrap items-end gap-2">
-          <input type="hidden" name="publication_id" value={p.id} />
-          <div class="w-64 truncate text-sm">
-            <div class="font-medium">{p.project.title}</div>
-            <div class="font-mono text-xs opacity-60">{p.channel.slug} · {p.project.language}</div>
-          </div>
-          <label class="form-control">
-            <span class="label-text text-xs">조회수</span>
-            <input name="views" type="number" min="0" class="input input-bordered input-xs w-24" />
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">좋아요</span>
-            <input name="likes" type="number" min="0" class="input input-bordered input-xs w-20" />
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">댓글</span>
-            <input name="comments" type="number" min="0" class="input input-bordered input-xs w-20" />
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">공유</span>
-            <input name="shares" type="number" min="0" class="input input-bordered input-xs w-20" />
-          </label>
-          <button type="submit" class="btn btn-xs">기록</button>
-          <a :if={p.external_url != ""} href={p.external_url} target="_blank" class="link text-xs">열기</a>
-        </form>
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>영상</th>
+                <th class="text-right">조회수</th>
+                <th class="text-right">좋아요</th>
+                <th class="text-right">댓글</th>
+                <th>잰 때</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={p <- @publications}>
+                <td class="max-w-[20rem]">
+                  <div class="truncate text-sm font-medium">{p.project.title}</div>
+                  <div class="font-mono text-xs opacity-60">{p.channel.slug} · {p.project.language}</div>
+                </td>
+                <td class="text-right font-mono">{(p.latest && p.latest.views) || "—"}</td>
+                <td class="text-right font-mono">{(p.latest && p.latest.likes) || "—"}</td>
+                <td class="text-right font-mono">{(p.latest && p.latest.comments) || "—"}</td>
+                <td class="text-xs opacity-60">
+                  {(p.latest && when_measured(p.latest.collected_at)) || "아직 안 쟀습니다"}
+                </td>
+                <td>
+                  <a :if={p.external_url != ""} href={p.external_url} target="_blank" class="link text-xs">
+                    열기
+                  </a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div :if={@data.measured > 0} class="mt-8 grid gap-6 lg:grid-cols-3">

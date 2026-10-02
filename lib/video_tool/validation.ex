@@ -138,7 +138,12 @@ defmodule VideoTool.Validation do
         finish(%{"narration_exists" => false}, [%{"scene_no" => nil, "issue" => "나레이션이 없습니다"}], [])
 
       true ->
-        gap = abs(render.duration_sec - narration.duration_sec)
+        # **앞뒤에 붙인 도입·마무리 길이를 빼고 본다.**
+        # 합성이 끝난 뒤 미리 만들어 둔 조각을 이어 붙이므로 완성본은 나레이션보다
+        # 그만큼 길다. 그걸 모르면 멀쩡한 편이 전부 "길이가 어긋난다" 로 막힌다
+        # (실측 2026-10-02: 34.83 / 30.38 — 차이 4.45초가 전부 구독 마무리였다).
+        extra = VideoTool.Assembly.wrap_seconds(project)
+        gap = abs(render.duration_sec - narration.duration_sec - extra)
         subtitles = Media.subtitles(narration.id)
 
         problems =

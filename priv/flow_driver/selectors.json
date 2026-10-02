@@ -44,6 +44,20 @@
     {
       "role": "button",
       "name": "새 프로젝트|New project"
+    },
+    {
+      "role": "button",
+      "name": "새로 만들기|새 프로젝트 만들기|프로젝트 만들기|Create new|New$"
+    },
+    {
+      "role": "link",
+      "name": "새로 만들기|새 프로젝트|New project|Create new"
+    },
+    {
+      "css": "a[href='/project'], a[href^='/project?'], a[href*='/project/new']"
+    },
+    {
+      "css": "button[aria-label*='새로 만들기'], button[aria-label*='새 프로젝트'], button[aria-label*='New project'], button[aria-label*='Create']"
     }
   ],
   "promptBox": [

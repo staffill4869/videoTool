@@ -104,6 +104,9 @@ defmodule VideoToolWeb.ProjectLive.Index do
               >
                 {row.title}
               </.link>
+              <div :if={row.topic != ""} class="mt-0.5 truncate text-xs" title={row.topic}>
+                {row.topic}
+              </div>
               <div class="mt-0.5 truncate text-[11px] text-base-content/60">
                 {row.aspect} · 장면 {row.scenes} · {row.voice}
               </div>

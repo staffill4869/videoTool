@@ -104,6 +104,10 @@ defmodule VideoToolWeb.SeriesLive do
 
         {:noreply, socket |> put_flash(:info, message) |> load()}
 
+      # 주제 중복 거절은 사람이 읽을 문장으로 온다. inspect 하면 따옴표에 갇힌다.
+      {:error, reason} when is_binary(reason) ->
+        {:noreply, put_flash(socket, :error, reason)}
+
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, inspect(reason))}
     end

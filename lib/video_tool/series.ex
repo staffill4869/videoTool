@@ -15,6 +15,9 @@ defmodule VideoTool.Series.Recipe do
     field :topic_brief, :string, default: ""
     # "계속 하나의 프롬프트로 찍어낸다" 의 그 프롬프트.
     field :standing_prompt, :string, default: ""
+    # Flow 에 등록해 둔 캐릭터 이름. 생성할 때마다 프롬프트에 붙인다.
+    # 글로 외모를 적는 것으로는 인물이 매 편 달라졌다 — 이것만이 확실하다.
+    field :flow_characters, {:array, :string}, default: []
 
     field :aspect, :string, default: "16:9"
     # 만들 언어들. 첫 번째가 원본, 나머지는 CLEAN 을 재사용하는 언어판이다.
@@ -54,7 +57,7 @@ defmodule VideoTool.Series.Recipe do
     timestamps(type: :utc_datetime)
   end
 
-  @fields ~w(name topic_brief standing_prompt aspect languages target_sec pipeline output_folder
+  @fields ~w(name topic_brief standing_prompt flow_characters aspect languages target_sec pipeline output_folder
              channel_slug
              interval_minutes active max_pending style_id domain_id voice_id
              subtitle_font voice_speech_rate run_times run_days auto_advance
@@ -144,9 +147,13 @@ defmodule VideoTool.Series do
       from p in Project,
         join: pub in "publications",
         on: pub.project_id == p.id and pub.status == "published",
-        where: not is_nil(p.series_id),
+        where: not is_nil(p.series_id) and not is_nil(pub.published_at),
         group_by: p.series_id,
-        select: {p.series_id, max(pub.updated_at)}
+        # **updated_at 을 쓰지 마라.** 발행과 상관없는 갱신에도 시각이 바뀐다 —
+        # 섬네일을 나중에 올리기만 해도 그 행이 "방금 발행" 으로 보여서
+        # 오래 못 나간 시리즈를 앞에 두는 순번이 통째로 무너진다
+        # (실측 2026-09-30: 섬네일 백필 뒤 지원사업이 3시간 밀렸는데 0시간으로 나왔다).
+        select: {p.series_id, max(pub.published_at)}
     )
     |> Map.new()
   end
@@ -340,12 +347,51 @@ defmodule VideoTool.Series do
   @doc """
   이 시리즈로 프로젝트를 하나 만든다. 대본은 비어 있다 — 에이전트가 쓴다.
   """
+  @doc """
+  이 시리즈에서 이미 쓴 제목과 주제. 최근 것부터.
+
+  새 편 주제를 고르는 쪽(에이전트·사람)이 무엇을 피해야 하는지 보려면 이게 필요하다.
+  `list_projects` 로는 안 보인다 — 거기는 기본이 "아직 안 끝난 편"만 내준다.
+  """
+  def used_topics(series_id, limit \\ 12) do
+    Repo.all(
+      from p in Project,
+        where: p.series_id == ^series_id,
+        order_by: [desc: p.id],
+        limit: ^limit,
+        select: {p.title, p.topic}
+    )
+  end
+
+  # 같은 주제로 두 번 만들지 않는다.
+  #
+  # 2026-09-23: 시리즈 5 의 #8·#9·#10·#13 이 전부 **시리즈 기본 주제 그대로** 만들어졌다.
+  # `topic` 을 안 주면 `topic_brief` 로 떨어지는데, 그건 시리즈 설명이지 이번 편 주제가
+  # 아니다. 같은 브리프를 받은 에이전트는 매번 비슷한 대본을 썼고, 거의 같은 영상이
+  # 네 편 올라갔다. 프롬프트에 "겹치지 않게" 라고 적어두는 것으로는 못 막는다.
+  #
+  # 글자가 정확히 같은 것만 막는다 — 비슷한 주제까지는 문자열로 가를 수 없다.
+  defp topic_is_new(series, topic) do
+    key = String.trim(topic || "")
+    used = used_topics(series.id)
+
+    if key != "" and Enum.any?(used, fn {_t, u} -> String.trim(u || "") == key end) do
+      {:error,
+       "이 주제는 이 시리즈에서 이미 만들었습니다. 이번 편 주제를 따로 정해서 " <>
+         "topic 으로 넘기세요 (시리즈 기본 주제를 그대로 쓰면 같은 영상이 또 나옵니다). " <>
+         "지금까지: " <> Enum.map_join(used, " / ", fn {t, _u} -> t end)}
+    else
+      :ok
+    end
+  end
+
   def spawn_project(%Recipe{} = series, opts \\ []) do
     title = opts[:title] || "#{series.name} ##{series.created_count + 1}"
+    topic = opts[:topic] || series.topic_brief
 
     attrs = %{
       "title" => title,
-      "topic" => opts[:topic] || series.topic_brief,
+      "topic" => topic,
       "target_sec" => series.target_sec,
       "aspect" => series.aspect,
       "style_slug" => series.style.slug,
@@ -358,7 +404,9 @@ defmodule VideoTool.Series do
       "subtitle_font" => series.subtitle_font || ""
     }
 
-    with {:ok, project} <- Projects.create_project(attrs),
+    with :ok <- under_pending_cap(series),
+         :ok <- topic_is_new(series, topic),
+         {:ok, project} <- Projects.create_project(attrs),
          {:ok, project} <-
            project |> Ecto.Changeset.change(series_id: series.id) |> Repo.update() do
       {:ok, _} =
@@ -370,6 +418,26 @@ defmodule VideoTool.Series do
         })
 
       {:ok, project}
+    end
+  end
+
+  # **한 시리즈에 안 끝난 편이 쌓이면 새로 만들지 않는다.**
+  #
+  # 상한 검사가 스케줄러 경로에만 있고 `spawn_project` 에는 없었다. 에이전트가 쓰는
+  # `run_series` 는 여기를 지나므로 영양제를 무한정 쌓을 수 있었다 — 실측(09-30):
+  # 지원사업 #9 를 올린 뒤 영양제 #47·#48·#49·#50 이 연달아 만들어졌고,
+  # "안 끝난 편부터 끝낸다" 규칙 때문에 지원사업은 영영 차례를 못 받았다.
+  #
+  # 거절할 때 **무엇을 하라고** 알려 준다. 이유만 말하면 같은 시리즈로 다시 시도한다.
+  defp under_pending_cap(series) do
+    pending = pending_count(series.id)
+
+    if pending >= series.max_pending do
+      {:error,
+       "'#{series.name}' 에 아직 안 끝난 편이 #{pending}개 있습니다 (상한 #{series.max_pending}). " <>
+         "그것부터 끝내거나, list_series 에서 starved_hours 가 더 큰 다른 시리즈를 고르세요."}
+    else
+      :ok
     end
   end
 

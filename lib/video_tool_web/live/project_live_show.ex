@@ -34,9 +34,57 @@ defmodule VideoToolWeb.ProjectLive.Show do
       languages: Projects.language_names(),
       voices: VideoTool.Presets.list_voices(),
       renders: Media.renders(project.id),
-      narration: Media.latest_narration(project.id)
+      narration: Media.latest_narration(project.id),
+      thumbnail: thumbnail_info(project)
     )
     |> load_prompt()
+  end
+
+  # 유튜브에 실제로 걸리는 그림과 그 크기를 화면에 내준다.
+  # 크기를 같이 보여 주는 이유: `thumb.jpg` 라는 이름만 맞고 내용이 연락지 격자인
+  # 파일이 18편에 올라가 있었다. 1280x720 이 아니면 그 자리에서 빨갛게 보여야 한다.
+  # 받은 파일을 스튜디오에서 바로 짝지을 수 있게 **영상 id 를 파일명에 박는다.**
+  # 발행 전이면 프로젝트 번호를 쓴다.
+  defp file_name(thumb, project, suffix) do
+    tag = if thumb.video_id in [nil, ""], do: "p#{project.id}", else: thumb.video_id
+    title = project.title |> to_string() |> String.slice(0, 24) |> String.replace(~r/[^\w가-힣 ]/u, " ")
+    "#{String.trim(title)} [#{tag}] #{suffix}.jpg"
+  end
+
+  defp thumbnail_info(project) do
+    renders = Media.renders(project.id)
+
+    render =
+      Enum.find(renders, &(is_binary(&1.thumbnail_path) and &1.thumbnail_path != "" and
+                             File.exists?(&1.thumbnail_path)))
+
+    if render do
+      {w, h} =
+        case VideoTool.Ffmpeg.probe(render.thumbnail_path) do
+          {:ok, %{width: w, height: h}} -> {w, h}
+          _ -> {0, 0}
+        end
+
+      published =
+        VideoTool.Publishing.publications(project.id)
+        |> Enum.count(& &1.thumbnail_uploaded)
+
+      %{
+        render_id: render.id,
+        path: render.thumbnail_path,
+        width: w,
+        height: h,
+        ok?: h > 0 and abs(w / h - 16 / 9) < 0.1,
+        published: published,
+        has_916?: File.exists?(Path.join(Path.dirname(render.thumbnail_path), "thumb916.jpg")),
+        # 스튜디오에서 짝을 맞추려면 파일명에 영상 id 가 있어야 한다.
+        video_id:
+          project.id
+          |> VideoTool.Publishing.publications()
+          |> Enum.find_value("", &(&1.external_id != "" && &1.external_id)),
+        uploaded: if(published > 0, do: "유튜브에 올라감", else: "아직 유튜브에 안 올라감")
+      }
+    end
   end
 
   defp load_prompt(socket) do
@@ -188,6 +236,73 @@ defmodule VideoToolWeb.ProjectLive.Show do
           나레이션 {round(@narration.duration_sec)}초
         </span>
       </div>
+
+      <%!-- 유튜브에 실제로 걸리는 그림. 영상만 보고 있으면 여기에 무엇이 올라갔는지 모른다 —
+            2026-09-30 에 898x786 짜리 연락지 격자가 18편에 섬네일로 올라간 걸
+            유튜브 채널 화면을 눈으로 보고서야 알았다. --%>
+      <section class="mt-6">
+        <h2 class="mb-2 font-semibold">썸네일</h2>
+
+        <p :if={@thumbnail == nil} class="text-sm opacity-60">
+          아직 없습니다. make_thumbnail(project_id, line1, line2) 로 만듭니다.
+          <span class="opacity-70">없으면 유튜브가 영상 중간 프레임을 멋대로 골라 씁니다.</span>
+        </p>
+
+        <%!-- 크기는 인라인으로 박는다. Tailwind 빌드가 서버에서 갱신 안 되면
+              max-h-* 같은 클래스가 CSS 에 없어 그림이 화면을 통째로 먹는다. --%>
+        <div :if={@thumbnail} style="max-width: 420px">
+          <img
+            src={~p"/renders/#{@thumbnail.render_id}/play?variant=thumb"}
+            alt="썸네일"
+            style="display:block; width:100%; height:auto; border-radius:6px"
+            class="border border-base-300 bg-base-200"
+          />
+          <div class="mt-2 text-xs opacity-70">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class={["badge badge-sm", !@thumbnail.ok? && "badge-error"]}>
+                {@thumbnail.width}×{@thumbnail.height}
+              </span>
+              <span>{@thumbnail.uploaded}</span>
+              <span>올라간 편 {@thumbnail.published}개</span>
+            </div>
+            <p :if={!@thumbnail.ok?} class="mt-1 text-error">
+              가로 16:9 가 아닙니다 — 이건 썸네일이 아니라 다른 그림입니다.
+              make_thumbnail 로 다시 만드세요.
+            </p>
+            <div class="mt-1 break-all opacity-50">{@thumbnail.path}</div>
+            <a
+              href={~p"/renders/#{@thumbnail.render_id}/play?variant=thumb&as=#{file_name(@thumbnail, @project, "16x9")}"}
+              class="btn btn-sm btn-outline mt-2"
+            >
+              가로 16:9 받기
+            </a>
+          </div>
+        </div>
+
+        <%!-- 쇼츠 세로 타일은 유튜브 API 로 못 올린다 (2026-09-30 두 편으로 확인).
+              그래서 파일만 만들어 두고 스튜디오에 손으로 넣게 한다. --%>
+        <div :if={@thumbnail && @thumbnail.has_916?} class="mt-4" style="max-width: 200px">
+          <div class="mb-1 text-xs font-semibold opacity-70">쇼츠 세로판 (9:16)</div>
+          <img
+            src={~p"/renders/#{@thumbnail.render_id}/play?variant=thumb916"}
+            alt="쇼츠 세로 썸네일"
+            style="display:block; width:100%; height:auto; border-radius:6px"
+            class="border border-base-300 bg-base-200"
+          />
+          <a
+            href={~p"/renders/#{@thumbnail.render_id}/play?variant=thumb916&as=#{file_name(@thumbnail, @project, "9x16")}"}
+            class="btn btn-sm btn-primary mt-2"
+          >
+            세로 9:16 받기
+          </a>
+          <p class="mt-1 text-xs opacity-60">
+            스튜디오 → 해당 쇼츠 → 썸네일 네모 클릭 → <b>변경</b> → 이 파일 선택
+          </p>
+          <p class="mt-1 text-xs opacity-50">
+            이 자리는 API 로 못 바꿉니다. 손으로 한 번만 올리면 됩니다.
+          </p>
+        </div>
+      </section>
 
       <section class="mt-6">
         <h2 class="mb-2 font-semibold">완성본</h2>

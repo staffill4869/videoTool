@@ -12,8 +12,17 @@ defmodule VideoTool.Assembly do
 
   # 나레이션이 영상보다 길거나 짧을 때 장면 하나를 얼마나 늘리고 줄일지의 한계.
   # 이 범위를 벗어나면 배속으로 맞추지 않고 다른 수단을 쓴다 — 배속이 티가 나기 때문이다.
-  @speed_min 0.85
+  #
+  # 아래쪽 한계를 0.85 → 0.62 로 내렸다(2026-09-23, 속도감 요청).
+  # Flow 는 무조건 8초 클립을 낸다. 장면을 5.5초로 잡으면 f = 0.69 인데, 0.85 기준이면
+  # **배속이 아니라 앞을 2.5초 잘라냈다** — 카메라 움직임의 3분의 1이 사라질 뿐
+  # 빨라지지는 않는다. 0.62 로 내리면 8초가 5.5초로 **1.45배속**돼 같은 움직임이 빠르게 간다.
+  # 더 내리면(=1.6배 이상) 배속이 눈에 띄기 시작하므로 거기서 멈춘다.
+  @speed_min 0.62
   @speed_max 1.35
+
+  # 마지막 장면에 남기는 여운. 0 이면 말 끝나자마자 뚝 끊기고, 길면 무음이 남는다.
+  @last_tail_sec 1.0
 
   # ── 나레이션 저장 · 정렬 ────────────────────────────────────────
 
@@ -33,8 +42,10 @@ defmodule VideoTool.Assembly do
       # 클립이 다 있으면 **클립 길이가 곧 장면 시간**이다. 글자 수 비례로 나누면
       # 영상은 8초씩 가는데 자막은 6초씩 가서 장면마다 어긋난다 (실측: 4번째에서 9초).
       timing =
-        narration_timing(project, opts[:scene_secs]) ||
-          clip_timing(project) || scene_timing(segments, duration, silences)
+        (narration_timing(project, opts[:scene_secs]) ||
+           clip_timing(project) || scene_timing(segments, duration, silences))
+        |> fit_to_audio(duration)
+
       cps = measured_cps(segments, duration)
 
       attrs = %{
@@ -52,6 +63,7 @@ defmodule VideoTool.Assembly do
       with {:ok, narration} <- Media.create_narration(attrs) do
         rows = subtitle_rows(segments, timing)
         {:ok, _} = Media.replace_subtitles(narration, rows)
+        {:ok, _} = Projects.sync_status(project.id)
 
         {:ok,
          %{
@@ -137,9 +149,14 @@ defmodule VideoTool.Assembly do
           # 마지막 장면은 통째로. 음성이 없는 장면도 클립 길이 그대로 둔다.
           # **클립보다 길게 잡지 않는다.** 8초짜리에 8.5초를 요구하면 잘라 봐야 8초만 나오고,
           # 시간표만 0.5초 앞서 가서 그 차이가 뒤로 계속 쌓인다 (드리프트의 정체다).
+          # 마지막 장면도 **여운만** 주고 자른다.
+          # 예전에는 클립을 통째로 남겼는데(8초), 대사가 3초면 5초가 무음으로 남았다.
+          # 쇼츠에서 그 구간은 그냥 이탈이고, `validate(final)` 도 "완성본과 나레이션이
+          # 2초 넘게 어긋난다"로 발행을 막는다(실측 2026-09-23, 77번: 42.2 vs 37.4).
           d =
             cond do
-              scene.id == last.id or is_nil(spoken) -> clip
+              is_nil(spoken) -> clip
+              scene.id == last.id -> min(spoken + @last_tail_sec, clip)
               true -> min(spoken * 1.0, clip)
             end
           stop = Float.round(cursor + d, 3)
@@ -159,6 +176,53 @@ defmodule VideoTool.Assembly do
 
   # 장면별 TTS 는 work/tts/s01.mp3 규칙으로 떨어져 있다. 부르는 쪽이 길이를 안 넘겨주면
   # 여기서 직접 잰다 — 안 넘겨줬다는 이유로 틀린 시간표를 쓰는 것보다 낫다.
+  # 시간표의 합은 **실제 음성 길이**와 같아야 한다. 이걸 아무도 확인하지 않아서
+  # 조용히 어긋난 채로 발행됐다.
+  #
+  # 실측(117번, 2026-09-30): 대본을 존댓말로 고쳐 다시 읽혔는데 `work/tts/s*.mp3` 는
+  # 04:07 에 만든 평서문 판이 그대로 남아 있었다. `measure_scene_tts` 는 그 파일이
+  # 지금 나레이션의 것인지 보지 않으므로 합 59.14초를 그대로 믿었고, 실제 음성은
+  # 53.79초였다. 60.14초짜리 시간표에 53.79초 음성이 얹혀 뒤로 갈수록 자막이 밀렸다.
+  #
+  # 장면별 파일이 낡았는지 새것인지 알 방법이 없으니 **결과를 검산한다** —
+  # 합이 음성 길이와 다르면 장면 비율만 살리고 길이를 실제에 맞춘다.
+  # 비율을 버리지 않는 이유: 어느 장면이 긴지는 대개 맞고, 틀린 건 전체 축척뿐이다.
+  @drift_tol 0.5
+
+  @doc false
+  def fit_to_audio(nil, _duration), do: nil
+  def fit_to_audio([], _duration), do: []
+
+  def fit_to_audio(timing, duration) when is_number(duration) and duration > 0 do
+    total = Enum.reduce(timing, 0.0, &((&1["target_sec"] || 0.0) + &2))
+    # 마지막 장면의 여운(@last_tail_sec)만큼은 음성보다 길어도 맞는 것이다.
+    want = duration + @last_tail_sec
+
+    if total <= 0.0 or abs(total - want) <= @drift_tol do
+      timing
+    else
+      k = want / total
+
+      {rows, _} =
+        Enum.map_reduce(timing, 0.0, fn row, cursor ->
+          d = Float.round((row["target_sec"] || 0.0) * k, 3)
+          stop = Float.round(cursor + d, 3)
+
+          # **tight 로 표시한다.** 이걸 안 붙이면 `fit_mode` 가 :clips 를 돌려주고
+          # 클립이 원본 길이(8초) 그대로 쓰인다 — 자막만 줄고 영상은 안 줄어
+          # 어긋남이 되레 커진다 (실측 117번: 자막 54.78초인데 완성본 64.04초).
+          # 축척을 고쳤다는 것은 이 시간표가 확정이라는 뜻이니 클립을 여기에 맞춘다.
+          row = Map.put(row, "mode", "tight")
+
+          {%{row | "start" => Float.round(cursor, 3), "end" => stop, "target_sec" => d}, stop}
+        end)
+
+      rows
+    end
+  end
+
+  def fit_to_audio(timing, _duration), do: timing
+
   defp measure_scene_tts(project) do
     dir = Path.join([work_dir(project), "work", "tts"])
 
@@ -204,10 +268,45 @@ defmodule VideoTool.Assembly do
     File.mkdir_p!(dir)
     dest = Path.join(dir, "narration#{ext(src)}")
 
-    cond do
-      String.starts_with?(src, "http") -> download(src, dest)
-      File.exists?(src) -> copy(src, dest)
-      true -> {:error, "음성 파일을 찾을 수 없습니다: #{src}"}
+    placed =
+      cond do
+        String.starts_with?(src, "http") -> download(src, dest)
+        File.exists?(src) -> copy(src, dest)
+        true -> {:error, "음성 파일을 찾을 수 없습니다: #{src}"}
+      end
+
+    with {:ok, path} <- placed, do: retime(path, speech_rate(project))
+  end
+
+  @doc false
+  # 낭독 속도. voices.speech_rate 가 0 이면 그대로 둔다.
+  #
+  # **길이를 맞추려고 여기를 올리지 마라** — 그건 대본으로 한다.
+  # 이 값은 "이 목소리가 원래 느리다" 를 바로잡는 자리다 (Ainsley 는 늘어진다).
+  # 음높이는 안 변한다. 1.15 를 넘기면 급하게 읽는 티가 난다.
+  def speech_rate(project) do
+    rate = (project.voice && project.voice.speech_rate) || 0.0
+    if rate > 0.0, do: min(max(rate, 0.8), 1.5), else: 0.0
+  end
+
+  defp retime(path, 0.0), do: {:ok, path}
+
+  defp retime(path, rate) do
+    out = Path.rootname(path) <> "_rate" <> Path.extname(path)
+
+    case Ffmpeg.exec(["-v", "error", "-y", "-i", path, "-filter:a", "atempo=#{f(rate)}", out]) do
+      {:ok, _} ->
+        if File.exists?(out) do
+          File.rm(path)
+          File.rename!(out, path)
+          {:ok, path}
+        else
+          {:ok, path}
+        end
+
+      # 속도 조절이 실패해도 원본으로 간다. 무음보다는 느린 게 낫다.
+      {:error, _} ->
+        {:ok, path}
     end
   end
 
@@ -316,17 +415,83 @@ defmodule VideoTool.Assembly do
     |> Enum.map(fn {row, i} -> Map.put(row, :index, i) end)
   end
 
+  # 자막 한 줄의 최대 글자 수. 세로 1080 폭에 84pt 면 한 줄에 열두 자쯤 들어가므로
+  # 이 값이면 두 줄을 넘지 않는다. 더 키우면 세 줄이 되어 화면을 덮는다.
+  @sub_max_chars 18
+
   defp split_lines(text, from, to) do
     sentences =
       text
       |> String.split(~r/(?<=[.!?])\s+/u, trim: true)
       |> Enum.reject(&(String.trim(&1) == ""))
+      |> Enum.flat_map(&chunk/1)
 
     case sentences do
       [] -> []
       list -> allocate(list, from, to)
     end
   end
+
+  @doc false
+  # 긴 문장을 쉼표·띄어쓰기에서 잘라 짧은 토막으로 만든다.
+  #
+  # 예전에는 문장 부호에서만 끊었다. 한 장면이 8초인데 문장이 둘이면 한 줄이 4초씩
+  # 떠 있어서, 읽고 나서도 한참 남는다. 짧게 끊어 넘겨야 눈이 따라간다.
+  # **쉼표를 먼저 본다** — 말이 실제로 쉬는 자리라 여기서 끊으면 어색하지 않다.
+  def chunk(sentence) do
+    text = String.trim(sentence)
+
+    if String.length(text) <= @sub_max_chars do
+      [text]
+    else
+      case break_at(text) do
+        nil -> [text]
+        i -> [String.slice(text, 0, i) |> String.trim()] ++ chunk(String.slice(text, i..-1//1))
+      end
+    end
+  end
+
+  # 자를 자리. **가운데에 가까운 곳**을 고른다.
+  #
+  # 맨 뒤에서 자르면 남는 토막이 한 마디로 짧아진다 — "…고칠 값어치가" / "있을까요?" 처럼
+  # 뒤가 0.75초만 떠서 읽히지 않는다(2026-09-29 실측). 반씩 나누면 둘 다 읽을 시간이 생긴다.
+  # 다만 앞 토막이 @sub_max_chars 를 넘으면 줄이 세 줄이 되므로 거기서 멈춘다.
+  # **고르게 자른다.** 예전에는 `target = min(len/2, @sub_max_chars)` 였는데,
+  # 그러면 한 조각을 상한까지 꽉 채우고 나머지를 쪼개서 길이가 들쭉날쭉해진다 —
+  # 38자 문장이 18 / 10 / 10 으로 잘렸다. 시간은 글자 수에 비례해 나누므로
+  # 앞은 2.6초 떠 있고 뒤 두 개는 1.5초씩 스쳐 간다 (실측 117번: 최소 1.10초 · 최대 3.33초).
+  #
+  # 몇 조각이 필요한지 먼저 세고 그 수로 나눈 자리를 노린다. 38자면 3조각, 13자씩이다.
+  # 상한(hi)은 그대로 지킨다 — 한 줄에 열두 자쯤 들어가므로 그 위로 가면 세 줄이 된다.
+  defp break_at(text) do
+    len = String.length(text)
+    lo = div(len, 4)
+    hi = min(@sub_max_chars, len - 1)
+    pieces = max(ceil(len / @sub_max_chars), 2)
+    target = min(round(len / pieces), @sub_max_chars)
+
+    find_mark(text, lo, hi, target, [",", "،", ";", ":"]) ||
+      find_mark(text, lo, hi, target, [" "])
+  end
+
+  defp find_mark(text, lo, hi, target, marks) do
+    lo..hi//1
+    |> Enum.filter(&(String.at(text, &1) in marks and not thousands_comma?(text, &1)))
+    |> Enum.min_by(&abs(&1 - target), fn -> nil end)
+    |> case do
+      nil -> nil
+      i -> i + 1
+    end
+  end
+
+  # **천 단위 쉼표에서 자르지 않는다.** 98편에서 "2,500만 원" 이 여기서 잘려
+  # 화면에 "500만 원" 으로 떴다. 금액이 다섯 배 틀리는 자막이 나간 뻔했다.
+  defp thousands_comma?(text, i) do
+    String.at(text, i) == "," and digit?(String.at(text, i - 1)) and digit?(String.at(text, i + 1))
+  end
+
+  defp digit?(nil), do: false
+  defp digit?(c), do: c =~ ~r/^[0-9]$/
 
   defp allocate(list, from, to) do
     weights = Enum.map(list, &max(String.length(&1), 1))
@@ -351,6 +516,41 @@ defmodule VideoTool.Assembly do
   다른 언어판이 그걸 다시 쓴다.
   """
   def assemble(project, opts \\ []) do
+    with_lock(project.id, fn -> do_assemble(project, opts) end)
+  end
+
+  # **합성은 서버 전체에서 한 번에 하나.**
+  #
+  # 처음에는 프로젝트마다 하나로 막았다. pipeline.ex 의 post_production 이 완성본이
+  # 없으면 합성을 시작하는데, 그게 "다음 할 일이 뭐냐" 를 물을 때마다 불려서
+  # 물어볼 때마다 한 개씩 쌓였기 때문이다 — 실측(09-30): 118 편 하나에 ffmpeg 8개가
+  # 붙어 같은 clip_05.mp4 를 셋이 동시에 썼다.
+  #
+  # 그런데 그것만으로는 모자랐다. **서로 다른 편 둘이 동시에 합성되면 똑같이 무너진다.**
+  # 이 서버는 2 vCPU 다. 같은 합성이 동시 8개일 때 30분, 혼자일 때 3분 걸렸다 —
+  # 열 배다. 인코딩은 CPU 를 그대로 먹으므로 겹쳐 돌리면 합쳐서도 느려진다.
+  # 그래서 프로젝트 번호를 빼고 **전역 자물쇠 하나**로 바꾼다.
+  #
+  # 기다리지 않고 바로 돌려보낸다 (Retries: 0). 기다려 봐야 프로세스만 붙잡고 있고,
+  # 부른 쪽은 다음 차례에 다시 물어보면 된다.
+  @doc false
+  def with_lock(_project_id, fun) do
+    lock = {:assemble, self()}
+
+    case :global.set_lock(lock, [node()], 0) do
+      true ->
+        try do
+          fun.()
+        after
+          :global.del_lock(lock, [node()])
+        end
+
+      false ->
+        {:error, "다른 편을 합성하는 중입니다. 끝나면 다시 부르세요."}
+    end
+  end
+
+  defp do_assemble(project, opts) do
     dir = work_dir(project)
     File.mkdir_p!(Path.join(dir, "work"))
 
@@ -375,7 +575,8 @@ defmodule VideoTool.Assembly do
          {:ok, pieces} <- retime_all(plan, dir, opts, overlaps),
          {:ok, joined} <- dissolve(pieces, overlaps, dir, opts),
          {:ok, master} <- concat_and_mix(joined, narration, dir),
-         {:ok, final} <- burn_subtitles(project, master, narration, dir, opts) do
+         {:ok, burned} <- burn_subtitles(project, master, narration, dir, opts),
+         {:ok, final} <- wrap_ends(project, burned, dir) do
       {:ok, probe} = Ffmpeg.probe(final)
 
       attrs = %{
@@ -392,10 +593,18 @@ defmodule VideoTool.Assembly do
           # 어떤 폰트로 구웠는지 남긴다. 나중에 "이 편만 글자가 다르다" 를 추적하려면 필요하다.
           "subtitle_font" => font
         },
-        file_size: File.stat!(final).size
+        file_size: File.stat!(final).size,
+        # **섬네일을 물려받는다.**
+        #
+        # 합성은 부를 때마다 렌더 행을 새로 만든다. 그런데 정상 흐름이
+        # 「합성 → check_video → 고침 → 재합성」 이라, 붙여 둔 섬네일이 옛 행에
+        # 남고 발행은 최신 행을 본다 — 그래서 올린 영상 22편 전부 섬네일이
+        # 없었다(2026-09-29 실측). 파일은 그대로 있으니 경로만 이어 준다.
+        thumbnail_path: inherited_thumbnail(project.id)
       }
 
-      with {:ok, render} <- Media.create_render(attrs) do
+      with {:ok, render} <- Media.create_render(attrs),
+           {:ok, _} <- VideoTool.Projects.sync_status(project.id) do
         {:ok,
          %{
            render_id: render.id,
@@ -411,6 +620,18 @@ defmodule VideoTool.Assembly do
 
   # 나레이션을 장면 길이에 맞춰 저장했으면(tight) 클립 뒤를 잘라 쓴다.
   # 그게 아니면 예전대로 클립을 통째로 쓴다.
+  @doc false
+  # 이 편에 이미 붙여 둔 섬네일. 파일이 없어졌으면 물려받지 않는다.
+  def inherited_thumbnail(project_id) do
+    Media.renders(project_id)
+    |> Enum.filter(&(&1.kind == "final" and (&1.thumbnail_path || "") != ""))
+    |> List.last()
+    |> case do
+      nil -> ""
+      r -> if File.exists?(Path.expand(r.thumbnail_path)), do: r.thumbnail_path, else: ""
+    end
+  end
+
   defp fit_mode(narration) do
     if Enum.any?(List.wrap(narration.scene_timing), &(&1["mode"] == "tight")),
       do: :scenes,
@@ -762,25 +983,9 @@ defmodule VideoTool.Assembly do
       ["-f", "concat", "-safe", "0", "-i", list, "-i", narration.file_path] ++
         if bgm, do: ["-stream_loop", "-1", "-i", bgm], else: []
 
-    # 나레이션이 위, 효과음은 낮게, 음악은 더 낮게.
-    layers =
-      (if sfx?, do: ["[0:a]volume=0.25[sfx]"], else: []) ++
-        (if bgm, do: ["[2:a]volume=0.10[bgm]"], else: []) ++
-        ["[1:a]volume=1.0,apad[nar]"]
-
-    mixed = (if sfx?, do: ["[sfx]"], else: []) ++ (if bgm, do: ["[bgm]"], else: []) ++ ["[nar]"]
-
     audio =
       if sfx? or bgm do
-        [
-          "-filter_complex",
-          Enum.join(layers, ";") <>
-            ";" <>
-            Enum.join(mixed) <>
-            "amix=inputs=#{length(mixed)}:duration=longest:dropout_transition=0," <>
-            "dynaudnorm=p=0.9[a]",
-          "-map", "[a]"
-        ]
+        ["-filter_complex", audio_filter(sfx?, not is_nil(bgm)), "-map", "[a]"]
       else
         # 소리 없는 클립에 음악도 없다 — 나레이션만 싣고 뒤는 무음으로 채운다.
         ["-map", "1:a:0", "-af", "apad"]
@@ -799,6 +1004,31 @@ defmodule VideoTool.Assembly do
         ]
 
     done(args, out)
+  end
+
+  @doc false
+  # 소리 세 겹(클립 효과음 · 배경 음악 · 나레이션)을 하나로 섞는 필터.
+  # 나레이션이 위, 효과음은 -12dB, 음악은 -23dB. 레벨은 **고정이다.**
+  #
+  # **dynaudnorm 을 다시 끼우지 마라.** 15초짜리 창으로 이득을 계속 다시 잡아서
+  # 앞부분이 조용하다가 중간에 소리가 확 커진다 — 58편 실측으로 0초 -27.0 LUFS 에서
+  # 16초 -15.8 LUFS 까지 11dB 올라갔다. 나레이션 파일 자체는 평평했고 합성본만 출렁였다.
+  # amix 도 normalize=0 이어야 한다. 기본값(1) 은 입력 수로 나눠서 소리를 죽이고,
+  # 그걸 메우려고 자동 정규화를 붙이면 위 문제가 그대로 돌아온다.
+  # 지금 값: -20.3 LUFS · LRA 2.1 · 피크 -1.5 dBFS.
+  def audio_filter(sfx?, bgm?) do
+    layers =
+      (if sfx?, do: ["[0:a]volume=0.35[sfx]"], else: []) ++
+        (if bgm?, do: ["[2:a]volume=0.14[bgm]"], else: []) ++
+        ["[1:a]volume=1.4,apad[nar]"]
+
+    mixed = (if sfx?, do: ["[sfx]"], else: []) ++ (if bgm?, do: ["[bgm]"], else: []) ++ ["[nar]"]
+
+    Enum.join(layers, ";") <>
+      ";" <>
+      Enum.join(mixed) <>
+      "amix=inputs=#{length(mixed)}:duration=longest:dropout_transition=0:normalize=0," <>
+      "alimiter=limit=0.95[a]"
   end
 
   @doc """
@@ -893,6 +1123,14 @@ defmodule VideoTool.Assembly do
     end
   end
 
+  # **끝 구독 문구를 자막판에 덧그리지 않는다.** 두 번 시도했고 두 번 다 틀렸다:
+  #   1) ASS 벡터(\p1)로 화살표를 그렸더니 libass 가 "m -46 -70 l ..." 를 글자로 찍었다.
+  #   2) 역슬래시 하나가 Elixir 에 먹혀 `{ad(400,400)pos(...)}` 가 화면에 그대로 나갔다.
+  # 더 큰 문제는 **음성에만 문장을 덧붙여 자막과 길이가 어긋난 것**이다 —
+  # 그 장면 음성이 11초인데 자막은 8초치 글자만 가지고 있어 자막이 말보다 느려졌다.
+  # 그래서 구독 문구는 **장면 하나로 만든다** (마지막 장면, 따봉 그림 + 그 대사).
+  # 자막·음성·그림이 같은 `segment_text` 에서 나오므로 어긋날 길이 없다.
+
   # 장면마다 짧은 설명 글자를 **화면 위쪽**에 얹는다 (`scene.expected_labels`).
   # 자막은 아래(MarginV 260)에 있어 겹치지 않는다.
   # 그림에 글자를 그려 달라고 하지 않는 이유: 생성기는 한글을 못 쓴다 — 글자 모양만 흉내 낸
@@ -905,9 +1143,13 @@ defmodule VideoTool.Assembly do
     |> Enum.flat_map(fn scene ->
       with %{"start" => from0, "end" => stop} <- Map.get(timing, scene.id),
            [_ | _] = labels <- scene.expected_labels do
-        text = labels |> Enum.take(2) |> Enum.join("   ·   ")
-        from = from0 + 0.35
-        to = min(from + 3.2, stop - 0.25)
+        # **하나만 올린다.** 96pt 로 키운 뒤 두 개를 `·` 로 붙이면 폭 1080 을 넘겨
+        # 줄이 바뀌고, 숫자와 단위가 갈리면서 수치가 죽는다(2026-09-22 교훈).
+        # 여러 개를 보여줘야 하면 장면을 나누는 게 맞다.
+        text = labels |> Enum.take(1) |> Enum.join()
+        from = from0 + 0.3
+        # 장면이 5.5초로 짧아졌다. 3.2초를 붙들면 장면 내내 떠 있는 꼴이 된다.
+        to = min(from + 2.4, stop - 0.25)
 
         # 스치듯 지나가면 읽히지 않는다. 0.8초를 못 채우면 아예 안 넣는다.
         if to - from >= 0.8,
@@ -919,15 +1161,111 @@ defmodule VideoTool.Assembly do
     end)
   end
 
+  # ── 끝에 붙이는 구독 영상 ──────────────────────────────────
+  #
+  # **편마다 새로 만들지 않는다.** 시리즈마다 한 번 만들어 둔 파일을 그대로 이어 붙인다.
+  # 인물이 엄지를 들고 "구독과 좋아요 눌러주세요" 를 말하는 2~3초짜리다.
+  # 본편과 **같은 설정으로 구워 뒀기 때문에**(1080x1920 · 30fps · h264 · aac 44100 스테레오)
+  # `-c copy` 로 붙는다 — 전체를 다시 인코딩하면 2 vCPU 에서 몇 분이 더 든다.
+  #
+  # 파일이 없으면 그냥 넘어간다. 시리즈마다 만들 의무는 없다.
+  # 여러 개를 두고 **편마다 돌아가며** 쓴다. 같은 것이 매번 나오면 금방 질린다.
+  # 고르는 기준은 프로젝트 id 다 — 무작위가 아니라서 같은 편을 다시 합성해도 같은 것이 나온다
+  # (무작위면 재합성할 때마다 앞뒤가 바뀌어 "아까 그거" 를 다시 못 찾는다).
+  # 앞에 붙이는 **도입 영상**. 끝에 붙이는 것과 구조가 같다.
+  # 쇼츠는 첫 1초에 손가락이 멈추느냐가 전부라, 매 편 같은 훅으로 시작하는 쪽이
+  # 매번 새로 만드는 것보다 안정적이다.
+  @doc false
+  def intro_path(project), do: pick(project, "intro")
+
+  @doc false
+  def outro_path(project), do: pick(project, "outro")
+
+  defp pick(%{series_id: id, id: pid}, kind) when is_integer(id) do
+    :video_tool
+    |> :code.priv_dir()
+    |> to_string()
+    |> Path.join("#{kind}/series_#{id}_*.mp4")
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> case do
+      [] -> nil
+      files -> Enum.at(files, rem(pid, length(files)))
+    end
+  end
+
+  defp pick(_, _), do: nil
+
+  @doc """
+  이 편에 앞뒤로 붙는 도입·마무리의 **합친 길이**. 검증이 길이를 볼 때 이만큼 빼야 한다.
+  파일이 없으면 0 이다.
+  """
+  def wrap_seconds(project) do
+    [intro_path(project), outro_path(project)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.reduce(0.0, fn path, acc ->
+      case Ffmpeg.probe(path) do
+        {:ok, %{duration_sec: d}} when is_number(d) -> acc + d
+        _ -> acc
+      end
+    end)
+  end
+
+  defp wrap_ends(project, video, dir) do
+    parts =
+      [intro_path(project), video, outro_path(project)]
+      |> Enum.reject(&is_nil/1)
+
+    if length(parts) == 1 do
+      {:ok, video}
+    else
+      list = Path.join(dir, "wrap_list.txt")
+      out = Path.join(dir, "final_wrapped.mp4")
+      File.write!(list, Enum.map_join(parts, "
+", &"file '#{&1}'") <> "
+")
+
+      case Ffmpeg.exec(["-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", list,
+                        "-c", "copy", out]) do
+        {:ok, _} ->
+          # 자리를 바꿔 final.mp4 이름을 지킨다. 발행·섬네일이 이 이름을 본다.
+          File.rename!(out, video)
+          {:ok, video}
+
+        {:error, why} ->
+          # 붙이기에 실패해도 본편은 살린다. 도입·마무리는 보너스다.
+          Logger.warning("도입·마무리 붙이기 실패, 본편만 씁니다: #{inspect(why)}")
+          {:ok, video}
+      end
+    end
+  end
+
   # 자막 판을 화면비에 맞춘다. 1920x1080 으로 고정해 두면 9:16 영상에서 글자가
   # 가로로 눌려 나오고, 한 줄이 화면 밖으로 넘친다 — 세로는 폭이 절반도 안 된다.
+  # 자막을 화면 어디에 두는가. ASS 정렬은 숫자판 배치다 — 2 는 아래 가운데, 5 는 한가운데.
+  # 가운데로 올리면 그림을 가리므로, 그림이 아까우면 2 로 되돌린다.
+  @sub_align 5
+  # 외곽선을 두껍게. 배경이 밝은 그림체(로우폴리·플랫)에서 흰 글자가 묻히던 것을 막는다.
+  @sub_outline 4
+  @sub_shadow 0
+  # 위쪽 라벨은 96pt 라 자막보다 두껍게 잡아야 같은 굵기로 보인다.
+  @label_outline 8
+
   defp ass_header(font, aspect) do
     {w, h, size, margin_x, margin_v, label_size, label_v} =
       case aspect do
         # 세로는 폭이 1080 뿐이다. 글자를 키우면 두세 글자마다 줄이 바뀐다.
-        # 좌우 여백을 넉넉히 두고(각 80) 글자는 52pt — 한 줄에 13~15자가 들어간다.
-        "9:16" -> {1080, 1920, 52, 80, 260, 58, 150}
-        _ -> {1920, 1080, 54, 120, 90, 56, 70}
+        #
+        # 2026-09-23 요청으로 둘 다 키웠다:
+        #   아래 자막(size)      52 → 68  (1.3배). 한 줄 13~15자 → 10~11자로 줄어
+        #                        두 줄이 세 줄이 되기 쉽다. 그래서 좌우 여백을 80 → 60 으로
+        #                        줄여 폭을 벌고, 아래 여백도 260 → 210 으로 내렸다.
+        #   위쪽 라벨(label_size) 58 → 96. 대신 **핵심 단어 하나만** 올린다(label_lines 참고)
+        # 2026-09-29 요청: 자막을 키우고 **화면 가운데**로 올렸다 (Alignment 5).
+        #   자막(size) 68 → 84. 대신 한 줄을 18자로 끊는다(@sub_max_chars) — 안 그러면 세 줄이 된다.
+        #   가운데 정렬이라 MarginV 는 0 이다. 아래쪽으로 내리려면 @sub_align 을 2 로 되돌린다.
+        "9:16" -> {1080, 1920, 84, 60, 0, 96, 170}
+        _ -> {1920, 1080, 82, 120, 0, 84, 80}
       end
 
     """
@@ -940,8 +1278,13 @@ defmodule VideoTool.Assembly do
 
     [V4+ Styles]
     Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-    Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,3,1,2,#{margin_x},#{margin_x},#{margin_v},1
-    Style: Label,#{font},#{label_size},&H0066D9FF,&H00101010,&HA0000000,1,1,3,2,8,#{margin_x},#{margin_x},#{label_v},1
+    ; **Label 에 외곽선을 되돌렸다** (2026-09-30). 2026-09-23 에는 배경이 늘 단색이라
+    ; 외곽선 없이도 읽혔는데, 그림을 화면에 꽉 채우기로 하면서 라벨이 물체 위에 얹힌다.
+    ; 외곽선이 없으면 밝은 면에서 흰 글자가 통째로 사라진다.
+    ; 색은 흰색(&H00FFFFFF). 우리 화면은 어두운 스튜디오라 흰 글자가 읽힌다 —
+    ; 밝은 배경 그림체로 바꾸면 이 줄을 검은색(&H00000000)으로 되돌려야 한다.
+    Style: Default,#{font},#{size},&H00FFFFFF,&H00000000,&H80000000,1,1,#{@sub_outline},#{@sub_shadow},#{@sub_align},#{margin_x},#{margin_x},#{margin_v},1
+    Style: Label,#{font},#{label_size},&H00FFFFFF,&H00000000,&H00000000,1,1,#{@label_outline},0,8,#{margin_x},#{margin_x},#{label_v},1
 
     [Events]
     Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

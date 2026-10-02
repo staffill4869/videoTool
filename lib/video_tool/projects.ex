@@ -283,6 +283,27 @@ defmodule VideoTool.Projects do
       select: %{scene_id: g.scene_id, text: g.text, scene_no: s.scene_no}
     )
     |> Repo.all()
+    |> Enum.map(&%{&1 | text: strip_audio_tags(&1.text)})
+  end
+
+  @doc """
+  `[excited]` 같은 **감정 태그를 떼어낸 대사.** 태그는 일레븐랩스 v3 에게 주는
+  연기 지시문이지 사람이 읽을 말이 아니다 — 자막에 그대로 찍히면 안 되고,
+  글자 수에 섞이면 장면 길이가 그만큼 밀린다.
+  나레이션은 `segments_by_scene` 으로 **태그가 붙은 원문**을 받아 간다. 떼는 곳은 여기뿐이다.
+
+  태그는 모델이 아는 영어 낱말이다 (`[excited]` `[whispers]` `[sighs]`).
+  한국어로 적으면 안 된다 — 실측: `eleven_multilingual_v2` 는 "[신나서]" 를
+  **소리 내어 읽었고**(3.42초 → 5.04초), v3 는 같은 자리에서 0.39초만 늘었다.
+  """
+  def strip_audio_tags(nil), do: nil
+
+  def strip_audio_tags(text) when is_binary(text) do
+    text
+    |> String.replace(~r/\[[^\]
+]{1,40}\]/u, " ")
+    |> String.replace(~r/\s{2,}/u, " ")
+    |> String.trim()
   end
 
   # ── 대본 길이 계산 ──────────────────────────────────────────────
@@ -359,7 +380,9 @@ defmodule VideoTool.Projects do
       project_id: project.id,
       version: next_version + 1,
       raw_text: raw_text,
-      tts_text: tts_text || raw_text,
+      # **대본은 숫자로 쓰고, 읽을 글은 여기서 만든다.**
+      # 소리대로("시월 이일") 쓰면 자막이 그렇게 나간다 — 자막은 raw_text 를 쓴다.
+      tts_text: tts_text || VideoTool.Speech.spoken(raw_text),
       estimated_sec: est.estimated_sec,
       source: source || "draft"
     }
@@ -479,6 +502,78 @@ defmodule VideoTool.Projects do
     |> ScriptSegment.changeset(params)
     |> Repo.insert_or_update()
   end
+
+  @doc """
+  프로젝트 상태를 **실제 데이터로부터 다시 계산해 앞으로만 민다.**
+
+  화면의 진행 눈금 여덟 칸은 오직 이 `status` 만 본다(`VideoTool.Progress`).
+  그런데 이 값을 올리는 코드가 `scripted`·`scened` 둘뿐이라, 발행까지 끝난 편도
+  눈금이 장면에서 멈춰 있었다 — 2026-09-30 확인 당시 16편 전부 그랬다.
+  단계마다 따로 올리면 또 빠지는 자리가 생기므로, 여기서 한 번에 판정한다.
+
+  **뒤로는 가지 않는다.** 파일을 지우거나 자산을 반려해도 이미 발행한 편이
+  초안으로 돌아가면 안 된다 — 그 되돌림이 예전에 같은 영상을 두 번 올렸다.
+  """
+  def sync_status(project_id) when is_integer(project_id) do
+    case Repo.get(Project, project_id) do
+      nil -> {:error, :not_found}
+      project -> sync_status(project)
+    end
+  end
+
+  def sync_status(%Project{} = project) do
+    want = derived_status(project.id)
+
+    if Project.status_index(want) > Project.status_index(project.status) do
+      project |> Project.changeset(%{status: want}) |> Repo.update()
+    else
+      {:ok, project}
+    end
+  end
+
+  @doc false
+  # 데이터가 증명하는 가장 앞선 단계. 중간이 비어 있으면 거기서 멈춘다.
+  def derived_status(project_id) do
+    n = Repo.one(from s in Scene, where: s.project_id == ^project_id, select: count(s.id)) || 0
+    mapped = &mapped_count(project_id, &1)
+
+    cond do
+      published?(project_id) -> "done"
+      render?(project_id) -> "assembled"
+      narration?(project_id) -> "narrated"
+      # 클립은 모자라도 90% 면 합성이 된다. 판정도 같은 기준을 쓴다.
+      n > 0 and mapped.("clip") * 10 >= n * 9 -> "clips_done"
+      n > 0 and mapped.("info") >= n -> "info_done"
+      n > 0 and mapped.("clean") >= n -> "clean_done"
+      n > 0 -> "scened"
+      script?(project_id) -> "scripted"
+      true -> "draft"
+    end
+  end
+
+  defp mapped_count(project_id, kind) do
+    Repo.one(
+      from a in VideoTool.Media.Asset,
+        where: a.project_id == ^project_id and a.kind == ^kind and not is_nil(a.scene_id),
+        select: count(a.id)
+    ) || 0
+  end
+
+  defp script?(id),
+    do: Repo.exists?(from s in Script, where: s.project_id == ^id)
+
+  defp narration?(id),
+    do: Repo.exists?(from n in VideoTool.Media.Narration, where: n.project_id == ^id)
+
+  defp render?(id),
+    do: Repo.exists?(from r in VideoTool.Media.Render, where: r.project_id == ^id and r.kind == "final")
+
+  defp published?(id),
+    do:
+      Repo.exists?(
+        from p in VideoTool.Publishing.Publication,
+          where: p.project_id == ^id and p.external_id != ""
+      )
 
   @doc "화이트리스트는 통째로 교체한다 — 대본이 바뀌면 허용 목록도 통째로 바뀐다."
   def save_allowed_facts(script, facts) when is_list(facts) do

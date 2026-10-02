@@ -12,7 +12,7 @@ defmodule VideoTool.Narration do
   파일은 `work/tts/sNN.mp3` — `Assembly` 가 이 이름으로 장면 시간을 잰다.
   """
 
-  alias VideoTool.{Assembly, Ffmpeg, Projects, Settings}
+  alias VideoTool.{Assembly, Ffmpeg, Projects, Settings, SpeechText}
 
   @url "https://api.elevenlabs.io/v1/text-to-speech"
   @model "eleven_multilingual_v2"
@@ -21,7 +21,14 @@ defmodule VideoTool.Narration do
 
   @doc "opts: voice_id (없으면 project.variables[\"eleven_voice_id\"]), model_id, language (기본 ko)"
   def generate(project, opts \\ []) do
-    voice = opts[:voice_id] || get_in(project.variables || %{}, ["eleven_voice_id"])
+    # **목소리는 시리즈에 박힌 것이 먼저다.** opts 를 앞에 두면 에이전트가 넣는 값이
+    # 매번 이긴다 — 실측(2026-09-30, 2시간 로그): 한 채널 안에서 영어 목소리 Adam 3회,
+    # 힉스필드 UUID 2회가 섞여 편마다 목소리가 달랐고, 한국어 대본을 영어 목소리로
+    # 읽은 편이 그대로 발행됐다.
+    voice =
+      pinned_voice(project) ||
+        get_in(project.variables || %{}, ["eleven_voice_id"]) ||
+        opts[:voice_id]
     key = Settings.get(:elevenlabs_api_key)
     lang = opts[:language] || project.language || "ko"
 
@@ -63,6 +70,17 @@ defmodule VideoTool.Narration do
     end
   end
 
+  # 프로젝트에 붙은 목소리(시리즈에서 물려받는다)의 일레븐랩스 id.
+  # `voices.voice_id` 는 힉스필드 UUID 라 나레이션에 못 쓴다 — 그래서 칸을 따로 뒀다.
+  defp pinned_voice(%{voice_id: id}) when not is_nil(id) do
+    case VideoTool.Repo.get(VideoTool.Presets.Voice, id) do
+      %{eleven_voice_id: v} when is_binary(v) and v != "" -> v
+      _ -> nil
+    end
+  end
+
+  defp pinned_voice(_), do: nil
+
   defp need(v, _msg) when is_binary(v) and v != "", do: :ok
   defp need(_, msg), do: {:error, msg}
 
@@ -72,10 +90,15 @@ defmodule VideoTool.Narration do
     script = Projects.active_script(project.id)
     segs = Projects.segments_by_scene(script && script.id)
 
+    # **자막 글을 읽는 글로 바꿔서 보낸다.** 자막이 원본이고 TTS 는 파생이다 —
+    # 둘을 따로 적으면 반드시 어긋난다. 화면엔 `60%`, 일레븐랩스엔 `육십 퍼센트`.
     pairs =
       project.id
       |> Projects.scenes()
-      |> Enum.map(&{&1.scene_no, String.trim(segs[&1.id] || "")})
+      |> Enum.map(fn scene ->
+        text = SpeechText.to_speech(String.trim(segs[scene.id] || ""))
+        {scene.scene_no, text}
+      end)
 
     case Enum.find(pairs, fn {_, t} -> t == "" end) do
       nil when pairs != [] -> {:ok, pairs}
@@ -83,6 +106,11 @@ defmodule VideoTool.Narration do
       {no, _} -> {:error, "#{no}번 장면에 대본 구간이 없습니다. save_scenes 로 segment_text 를 넣으세요."}
     end
   end
+
+  # **구독 문장을 음성에만 덧붙이지 않는다.** 그렇게 했더니 그 장면 음성이 11초가 됐는데
+  # 자막은 원래 문장(8초치)만 가지고 있어, 자막 줄이 11초에 늘어나 말보다 느려졌다
+  # (실측 2026-10-01, 136번: 0:09 부터 눈에 띄게 어긋남).
+  # 구독은 **마지막 장면 자체**로 만든다 — segment_text 하나에서 음성·자막이 같이 나온다.
 
   defp speak(key, voice, text, lang, model, out) do
     case Req.post("#{@url}/#{voice}",

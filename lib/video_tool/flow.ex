@@ -259,8 +259,8 @@ defmodule VideoTool.Flow do
   def status, do: run(%{action: "status"}, @default_timeout)
 
   @doc "프롬프트를 넣고 생성 버튼을 누른다."
-  def paste_and_generate(prompt) do
-    run(%{action: "paste_and_generate", prompt: prompt}, 60_000)
+  def paste_and_generate(prompt, characters \\ []) do
+    run(%{action: "paste_and_generate", prompt: prompt, characters: characters}, 120_000)
   end
 
   @doc """
@@ -306,9 +306,12 @@ defmodule VideoTool.Flow do
   배정은 `Mapping` 이 한다 — CLEAN 은 순서대로, INFO 는 CLEAN 과 닮은 정도로,
   클립은 첫 프레임이 CLEAN 과 끝 프레임이 INFO 와 닮았는지로 (by_chain).
   """
-  def harvest(project, stage, exclude) do
+  def harvest(project, stage, exclude, scenes \\ nil) do
     with :ok <- right_tab?(project) do
-      do_harvest(project, stage, exclude)
+      result = do_harvest(project, stage, exclude, scenes)
+      # 받은 것이 장면에 다 붙었으면 단계가 올라간다. 화면의 진행 눈금이 이 값만 본다.
+      VideoTool.Projects.sync_status(project.id)
+      result
     end
   end
 
@@ -368,7 +371,7 @@ defmodule VideoTool.Flow do
 
   defp flow_id(_), do: nil
 
-  defp do_harvest(project, stage, exclude) do
+  defp do_harvest(project, stage, exclude, scenes) do
     kind = asset_kind(stage)
     dir = Path.join(project.work_dir, "incoming")
     # 이미 등록한 것 + **생성 전에 화면에 있던 것**. 뒤엣것을 빼지 않으면
@@ -382,7 +385,7 @@ defmodule VideoTool.Flow do
       if assets == [] do
         {:ok, %{kind: kind, new: 0, note: "새로 받은 것이 없습니다 (이미 다 등록했거나 결과가 없습니다)"}}
       else
-        placed = Mapping.assign(project, kind, assets)
+        placed = Mapping.assign(project, kind, assets, scenes)
         apply_placement(placed)
 
         {:ok,
@@ -499,7 +502,7 @@ defmodule VideoTool.Flow do
   Veo 는 분 단위로 걸린다. MCP 호출이 그동안 붙잡혀 있으면 클라이언트가 먼저 끊는다.
   그래서 진행 상태를 GenerationJob 행에 남기고 `next/1` 은 곧바로 `wait` 를 돌려준다.
   """
-  def run_stage_async(project, stage, prompt, expect) do
+  def run_stage_async(project, stage, prompt, expect, scenes \\ nil) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     {:ok, job} =
@@ -512,7 +515,7 @@ defmodule VideoTool.Flow do
       })
 
     Task.Supervisor.start_child(VideoTool.TaskSupervisor, fn ->
-      run_stage(job, project, stage, prompt, expect)
+      run_stage(job, project, stage, prompt, expect, scenes)
     end)
 
     {:ok, job}
@@ -525,16 +528,31 @@ defmodule VideoTool.Flow do
   # (125초 만에 done, 클립 0개). 진짜 증거는 받아온 파일 수다.
   @harvest_rounds 4
 
-  defp run_stage(job, project, stage, prompt, expect) do
+  # **인물이 나오는 단계에만** 캐릭터를 붙인다.
+  # clip(video) 은 이미 만들어진 그림을 움직이는 단계라 캐릭터를 또 붙일 필요가 없고,
+  # 붙이면 Flow 가 그 캐릭터로 장면을 새로 그려 원래 그림과 달라진다.
+  defp characters(project, stage) when stage in ["clean", "info"] do
+    # **스키마는 `Series.Recipe` 다.** `VideoTool.Series` 는 컨텍스트 모듈이라
+    # Repo.get 에 넘기면 Protocol.UndefinedError 가 나고 **생성 작업이 통째로 죽는다** —
+    # 겉으로는 "생성을 눌렀습니다" 가 돌아와서 두 시간을 엉뚱한 데서 찾았다 (2026-10-01).
+    case project.series_id && VideoTool.Repo.get(VideoTool.Series.Recipe, project.series_id) do
+      %{flow_characters: [_ | _] = names} -> names
+      _ -> []
+    end
+  end
+
+  defp characters(_project, _stage), do: []
+
+  defp run_stage(job, project, stage, prompt, expect, scenes) do
     result =
       # **먼저 이 편의 Flow 프로젝트로 간다.** 이걸 빼면 지금 열려 있는 아무 창에나
       # 프롬프트를 붙여넣는다 — 실측: 32·33번이 31번 창에 들어가 31번 이미지가
       # 33번 자산으로 등록됐다. 한 편당 Flow 프로젝트 하나가 원칙이다.
       with {:ok, _} <- project_editor(project),
-           {:ok, started} <- paste_and_generate(prompt) do
+           {:ok, started} <- paste_and_generate(prompt, characters(project, stage)) do
         since = started[:results_before] || 0
         before = started[:ids_before] || []
-        collect(project, stage, expect, since, before, @harvest_rounds, 0)
+        collect(project, stage, expect, since, before, @harvest_rounds, 0, scenes)
       end
 
     finish(job, result)
@@ -543,7 +561,7 @@ defmodule VideoTool.Flow do
   # 대기가 시간 초과로 끝나도 **화면에는 결과가 와 있을 수 있다.**
   # 실측: 영상 8개가 전부 나왔는데 900초를 넘겨 작업이 failed 로 찍히고 회수를 못 해,
   # 클립이 다 있는 프로젝트가 완성본 없이 남았다. 그래서 먼저 회수하고 나서 판단한다.
-  defp collect(project, stage, expect, since, before, rounds_left, got) do
+  defp collect(project, stage, expect, since, before, rounds_left, got, scenes) do
     # 다시 기다릴 때는 기준선을 "생성 전 화면 + 이미 받은 것" 으로 고정한다. 드라이버 기본값은
     # "지금 화면" 인데, 그러면 다 나왔지만 아직 못 받은 결과가 기준선에 들어가 새것으로 안 세진다 —
     # 67·68번 7번 클립이 화면에 있는데 15분을 더 기다렸고, 멈춘 줄 알고 confirm 까지 보낼 뻔했다.
@@ -554,7 +572,7 @@ defmodule VideoTool.Flow do
 
     waited = wait_results(expect - got, [since: since, stage: stage] ++ retry)
 
-    with {:ok, harvested} <- harvest(project, stage, before) do
+    with {:ok, harvested} <- harvest(project, stage, before, scenes) do
       new = harvested[:new] || 0
       got = got + new
       timed_out? = match?({:error, _}, waited)
@@ -565,7 +583,7 @@ defmodule VideoTool.Flow do
         rounds_left <= 1 -> if got > 0, do: {:ok, harvested}, else: waited
         # 시간 초과인데 새로 들어온 것도 없다 — 더 기다려도 같다.
         timed_out? and new == 0 -> waited
-        true -> collect(project, stage, expect, since, before, rounds_left - 1, got)
+        true -> collect(project, stage, expect, since, before, rounds_left - 1, got, scenes)
       end
     end
   end

@@ -10,7 +10,7 @@ defmodule VideoToolWeb.AgentLive do
   """
   use VideoToolWeb, :live_view
 
-  alias VideoTool.AgentStatus
+  alias VideoTool.{AgentControl, AgentStatus}
 
   @fast :timer.seconds(5)
   @slow :timer.seconds(15)
@@ -22,7 +22,47 @@ defmodule VideoToolWeb.AgentLive do
       :timer.send_interval(@slow, self(), :tick_slow)
     end
 
-    {:ok, socket |> assign(page_title: "에이전트", shell: nil) |> load() |> load_shell()}
+    {:ok,
+     socket
+     |> assign(
+       page_title: "에이전트",
+       shell: nil,
+       confirm_stop: false,
+       stop_result: nil,
+       confirm_run: false,
+       run_result: nil,
+       loop_running: AgentControl.running?()
+     )
+     |> load()
+     |> load_shell()}
+  end
+
+  # 정지는 한 번에 안 되게 한다. 이 화면은 이메일만 있으면 들어오는 곳이고,
+  # 잘못 누르면 밤새 돌던 제작이 끊긴다.
+  @impl true
+  def handle_event("ask_stop", _, socket), do: {:noreply, assign(socket, confirm_stop: true)}
+  def handle_event("cancel_stop", _, socket), do: {:noreply, assign(socket, confirm_stop: false)}
+
+  def handle_event("stop", _, socket) do
+    r = AgentControl.stop()
+
+    {:noreply,
+     socket
+     |> assign(confirm_stop: false, stop_result: r)
+     |> load_shell()}
+  end
+
+  # 한 번만 돌리기. 자동(타이머)은 화면에 두지 않는다 — 그건 키 있는 사람만.
+  def handle_event("ask_run", _, socket), do: {:noreply, assign(socket, confirm_run: true)}
+  def handle_event("cancel_run", _, socket), do: {:noreply, assign(socket, confirm_run: false)}
+
+  def handle_event("run_once", _, socket) do
+    r = AgentControl.run_once()
+
+    {:noreply,
+     socket
+     |> assign(confirm_run: false, stop_result: nil, run_result: r)
+     |> load_shell()}
   end
 
   defp load(socket) do
@@ -35,7 +75,11 @@ defmodule VideoToolWeb.AgentLive do
   # PowerShell·HTTP 를 타는 것들은 따로 돌린다. 5초마다 부르면 화면이 버벅인다.
   defp load_shell(socket) do
     snap = AgentStatus.snapshot()
-    assign(socket, shell: Map.take(snap, [:task, :running, :chrome, :log, :activity]))
+
+    assign(socket,
+      shell: Map.take(snap, [:task, :running, :chrome, :log, :activity]),
+      loop_running: AgentControl.running?()
+    )
   end
 
   @impl true
@@ -80,7 +124,75 @@ defmodule VideoToolWeb.AgentLive do
               무인 루프가 살아 있는지, 지금 무엇을 하고 있는지.
             </p>
           </div>
-          <span class="font-mono text-xs text-base-content/50">{@at} UTC · 5초마다 갱신</span>
+          <div class="flex items-center gap-3">
+            <span class="font-mono text-xs text-base-content/50">{@at} UTC · 5초마다 갱신</span>
+
+            <%!-- 화면에서 할 수 있는 건 **끄기**와 **한 번만 돌리기** 두 가지다.
+                  "2시간마다 자동" 은 일부러 안 둔다 — 켜두면 사람 없이 계속 크레딧이
+                  나가는 일이라, 서버에 들어올 수 있는 사람만 켜게 한다
+                  (ssh flow flow-start auto). 둘 다 확인 한 단계를 거친다. --%>
+            <button
+              :if={@loop_running and !@confirm_stop}
+              type="button"
+              phx-click="ask_stop"
+              class="btn btn-sm btn-outline btn-error"
+            >
+              무인 제작 끄기
+            </button>
+
+            <div :if={@confirm_stop} class="flex items-center gap-2">
+              <span class="text-xs text-base-content/70">지금 돌던 제작이 끊깁니다.</span>
+              <button type="button" phx-click="stop" class="btn btn-sm btn-error">끕니다</button>
+              <button type="button" phx-click="cancel_stop" class="btn btn-sm btn-ghost">취소</button>
+            </div>
+
+            <button
+              :if={!@loop_running and !@confirm_run}
+              type="button"
+              phx-click="ask_run"
+              class="btn btn-sm btn-outline btn-primary"
+            >
+              한 번 돌리기
+            </button>
+
+            <div :if={@confirm_run} class="flex items-center gap-2">
+              <span class="text-xs text-base-content/70">한 편 만들고 멈춥니다. 크레딧이 나갑니다.</span>
+              <button type="button" phx-click="run_once" class="btn btn-sm btn-primary">돌립니다</button>
+              <button type="button" phx-click="cancel_run" class="btn btn-sm btn-ghost">취소</button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          :if={@stop_result}
+          class={["rounded-lg border p-3 text-sm",
+                  @stop_result.ok && "border-warning bg-warning/10" || "border-error bg-error/10"]}
+        >
+          <div :if={@stop_result.ok} class="font-semibold">
+            무인 제작을 껐습니다{if @stop_result.stopped == [],
+              do: " (이미 멈춰 있었습니다)",
+              else: " — " <> Enum.join(@stop_result.stopped, " · ")}
+          </div>
+          <div :if={!@stop_result.ok} class="font-semibold">{@stop_result.reason}</div>
+          <div :if={@stop_result.ok} class="mt-1 text-xs text-base-content/70">
+            {@stop_result.note}
+          </div>
+          <div :if={@stop_result.ok and @stop_result.still_running != []} class="mt-1 text-xs text-base-content/70">
+            아직 도는 것: {Enum.join(@stop_result.still_running, " · ")} — 끝나게 두는 게 낫습니다
+          </div>
+        </div>
+
+        <div
+          :if={@run_result}
+          class={["rounded-lg border p-3 text-sm",
+                  @run_result.ok && "border-info bg-info/10" || "border-error bg-error/10"]}
+        >
+          <div class="font-semibold">
+            {if @run_result.ok, do: "제작을 시작했습니다", else: @run_result.reason}
+          </div>
+          <div :if={@run_result.ok} class="mt-1 text-xs text-base-content/70">
+            {@run_result.note}
+          </div>
         </div>
 
         <div :if={@shell} class="grid gap-3 sm:grid-cols-3">

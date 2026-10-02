@@ -18,6 +18,19 @@ defmodule VideoTool.YouTube.Upload do
   @insert_url "https://www.googleapis.com/upload/youtube/v3/videos"
   @thumbnail_url "https://www.googleapis.com/upload/youtube/v3/thumbnails/set"
   @captions_url "https://www.googleapis.com/upload/youtube/v3/captions"
+  @comments_url "https://www.googleapis.com/youtube/v3/commentThreads"
+  @rate_url "https://www.googleapis.com/youtube/v3/videos/rate"
+
+  # 올린 뒤 채널 이름으로 남기는 첫 댓글. 쇼츠는 설명을 잘 안 열어 보므로
+  # 구독 유도는 여기가 제일 잘 보인다.
+  #
+  # 할당량을 본다: 업로드 1,600 · 댓글 50 유닛이고 하루 한도가 10,000 이다.
+  # 6편이면 9,600 + 300 = 9,900 으로 겨우 들어간다. 편수를 더 늘리려면
+  # 여기를 먼저 끄는 게 낫다 — 댓글 때문에 업로드가 막히면 손해가 크다.
+  @first_comment """
+  도움이 되셨다면 구독과 좋아요 부탁드립니다.
+  궁금한 점은 댓글로 남겨 주세요.
+  """
   @chunk 8 * 1024 * 1024
 
   @doc """
@@ -35,7 +48,9 @@ defmodule VideoTool.YouTube.Upload do
          video_id: video_id,
          url: "https://youtu.be/#{video_id}",
          thumbnail: maybe_thumbnail(token, video_id, render),
-         captions: maybe_captions(token, video_id, publication, project)
+         captions: maybe_captions(token, video_id, publication, project),
+         comment: maybe_comment(token, video_id, publication, channel),
+         like: maybe_like(token, video_id, publication)
        }}
     end
   end
@@ -130,6 +145,94 @@ defmodule VideoTool.YouTube.Upload do
 
   # ── 섬네일 · 자막 ───────────────────────────────────────────────
 
+  @doc false
+  # 자기 채널 영상에 좋아요. 유튜브 화면에서 사람이 누르는 것과 같은 동작이다.
+  #
+  # **할당량을 잡아먹는다.** 업로드 1,600 · 댓글 50 · 좋아요 50 이라 한 편에 1,700 이다.
+  # 하루 한도 10,000 이면 5편이 끝이다 — 6편이면 10,200 으로 넘쳐 마지막 편이 통째로 막힌다.
+  # 그래서 기본 상한을 5편으로 내렸다. 편수를 늘리려면 좋아요부터 뺀다.
+  def maybe_like(_token, _video_id, %{privacy: "private"}), do: %{ok: false, reason: "비공개"}
+
+  def maybe_like(token, video_id, _publication) do
+    case Req.post(@rate_url,
+           params: [id: video_id, rating: "like"],
+           headers: [{"authorization", "Bearer " <> token}],
+           body: "",
+           receive_timeout: 30_000
+         ) do
+      {:ok, %{status: status}} when status in [200, 204] -> %{ok: true}
+      {:ok, %{status: status, body: body}} -> %{ok: false, reason: "#{status}: #{describe(body)}"}
+      {:error, reason} -> %{ok: false, reason: inspect(reason)}
+    end
+  end
+
+  @doc false
+  # 첫 댓글. 비공개(private) 영상에는 달지 않는다 — 아무도 못 보는데 할당량만 나간다.
+  # 실패해도 발행은 성공이다. 섬네일·자막과 같은 취급이다.
+  def maybe_comment(token, video_id, publication, channel \\ nil)
+
+  def maybe_comment(_token, _video_id, %{privacy: "private"}, _channel),
+    do: %{ok: false, reason: "비공개"}
+
+  def maybe_comment(token, video_id, _publication, channel) do
+    body = %{
+      "snippet" => %{
+        "videoId" => video_id,
+        "topLevelComment" => %{"snippet" => %{"textOriginal" => first_comment(channel)}}
+      }
+    }
+
+    case Req.post(@comments_url,
+           params: [part: "snippet"],
+           headers: [{"authorization", "Bearer " <> token}],
+           json: body,
+           receive_timeout: 30_000
+         ) do
+      {:ok, %{status: status}} when status in [200, 201] -> %{ok: true}
+      {:ok, %{status: status, body: body}} -> %{ok: false, reason: "#{status}: #{describe(body)}"}
+      {:error, reason} -> %{ok: false, reason: inspect(reason)}
+    end
+  end
+
+  @doc """
+  이 채널이 올린 뒤 남길 첫 댓글.
+
+  채널에 `first_comment` 가 적혀 있으면 그걸 쓰고, 비어 있으면 기본 문구를 쓴다.
+  채널마다 하고 싶은 말이 다르다 — 영양제는 프로필을 눌러 보라고 하고 싶고,
+  지원사업은 그럴 이유가 없다.
+
+  **유튜브 API 로는 댓글을 고정할 수 없다.** 고정은 화면에서 손으로 해야 한다
+  (댓글 ⋮ → 고정). 다만 채널 주인이 쓴 댓글은 목록 위쪽에 따로 표시된다.
+  """
+  def first_comment(channel \\ nil)
+
+  def first_comment(%{first_comment: text}) when is_binary(text) do
+    case String.trim(text) do
+      "" -> String.trim(@first_comment)
+      trimmed -> trimmed
+    end
+  end
+
+  def first_comment(_), do: String.trim(@first_comment)
+
+  @doc """
+  **이미 올라간 영상에 섬네일만 붙인다.**
+
+  `publish` 안에서만 부르던 걸 꺼냈다. 섬네일은 발행보다 늦게 만들어지는 일이 흔한데
+  (무인 루프 지시문에 그 단계가 아예 없었다 — 2026-09-30 기준 올라간 14편에 섬네일이
+  없었다), 그때마다 영상을 다시 올릴 수는 없다. 50유닛이면 갈아 끼울 수 있다.
+
+  실패해도 발행 기록은 건드리지 않는다. 섬네일이 없다고 영상을 내릴 이유는 없다.
+  """
+  def set_thumbnail(publication, channel, render) do
+    with {:ok, token} <- GoogleOAuth.access_token(channel) do
+      case maybe_thumbnail(token, publication.external_id, render) do
+        %{ok: true} = r -> {:ok, r}
+        %{ok: false, reason: reason} -> {:error, reason}
+      end
+    end
+  end
+
   defp maybe_thumbnail(token, video_id, render) do
     case thumbnail_file(render) do
       nil ->
@@ -158,7 +261,23 @@ defmodule VideoTool.YouTube.Upload do
     registered = if render.thumbnail_path != "", do: render.thumbnail_path
 
     [registered | Path.wildcard("projects/#{render.project_id}/{thumb,thumbnail}.{jpg,jpeg,png}")]
-    |> Enum.find(&(is_binary(&1) and File.exists?(&1)))
+    |> Enum.filter(&(is_binary(&1) and File.exists?(&1)))
+    |> Enum.find(&landscape?/1)
+  end
+
+  # **가로 16:9 만 섬네일로 올린다.**
+  #
+  # 예전에는 `thumb.jpg` 라는 이름만 보고 올렸다. 그 파일에 무엇이 들었는지는 안 봤다.
+  # 실측(2026-09-30): 발행된 23편 중 18편의 `thumb.jpg` 가 898x786 짜리 **연락지 격자**
+  # 였고(에이전트가 화면을 갈무리해 save_thumbnail 로 넣은 것), 그게 그대로 유튜브에
+  # 올라가 있었다. 채널에 장면 격자가 섬네일로 걸린 채 몇 편이 나갔다.
+  #
+  # `Thumbnail.compose` 는 1280x720 으로만 만든다. 그 비율이 아니면 섬네일이 아니다.
+  defp landscape?(path) do
+    case VideoTool.Ffmpeg.probe(path) do
+      {:ok, %{width: w, height: h}} when w > 0 and h > 0 -> abs(w / h - 16 / 9) < 0.1
+      _ -> false
+    end
   end
 
   defp image_type(path) do

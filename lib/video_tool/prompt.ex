@@ -187,12 +187,17 @@ defmodule VideoTool.Prompt do
 
   @doc "이 프로젝트에서 쓸 수 있는 변수 (장르 위에 그림체를 얹는다 — 그림체가 이긴다)."
   def variables(project) do
-    # 기본값 < 장르 < 그림체 < 프로젝트. 뒤가 이긴다.
-    # 표기언어는 프로젝트 언어에서 자동으로 채운다 — 언어판을 만들 때마다
-    # 변수를 손으로 고치게 하면 반드시 빠뜨린다.
-    %{"표기언어" => Projects.language_label(project.language)}
+    # 장르 < 그림체 < 표기언어(자동) < 프로젝트. 뒤가 이긴다.
+    #
+    # **표기언어는 그림체보다 뒤에 있어야 한다.** 앞에 두면 그림체 프리셋이 덮어쓴다 —
+    # 지금 그림체 12개가 전부 "한국어" 를 들고 있어서, 영어판을 만들어도 화면 글자만
+    # 한국어로 나왔다. 소리와 글자가 어긋나면 보는 사람이 두 번 읽는다.
+    #
+    # 프로젝트에 손으로 넣은 값은 여전히 이긴다 — 한 편만 예외를 두는 길은 남긴다.
+    %{}
     |> Map.merge(project.domain.variables || %{})
     |> Map.merge(project.style.variables || %{})
+    |> Map.merge(%{"표기언어" => Projects.language_label(project.language)})
     |> Map.merge(project.variables || %{})
   end
 

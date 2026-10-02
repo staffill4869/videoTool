@@ -17,17 +17,22 @@ defmodule VideoTool.Mapping do
   # 1등과 2등 점수 차가 이보다 작으면 구분했다고 볼 수 없다.
   @ambiguity_epsilon 0.02
 
-  @doc "kind 별로 배정한다. 반환값은 %{asset_id => {scene_id, confidence}}."
-  def assign(project, "clean", assets), do: by_order(project, "clean", assets)
-  def assign(project, "info", assets), do: by_similarity(project, assets, "clean", :phash)
-  def assign(project, "clip", assets), do: by_chain(project, assets)
+  @doc """
+  kind 별로 배정한다. 반환값은 %{asset_id => {scene_id, confidence}}.
+
+  `only` 는 이번 생성에서 **요청한 장면 번호** 다. 주면 그 장면들 안에서만 고른다.
+  """
+  def assign(project, kind, assets, only \\ nil)
+  def assign(project, "clean", assets, only), do: by_order(project, "clean", assets, only)
+  def assign(project, "info", assets, only), do: by_similarity(project, assets, "clean", :phash, only)
+  def assign(project, "clip", assets, only), do: by_chain(project, assets, only)
 
   def low_confidence?(confidence), do: confidence < @low_confidence
 
   # ── CLEAN — 순서 기반 ───────────────────────────────────────────
 
-  defp by_order(project, kind, assets) do
-    scenes = target_scenes(project, kind)
+  defp by_order(project, kind, assets, only) do
+    scenes = target_scenes(project, kind, only)
 
     assets
     |> Enum.sort_by(& &1.source_filename)
@@ -37,13 +42,13 @@ defmodule VideoTool.Mapping do
 
   # ── INFO — CLEAN 과의 phash 유사도 (+ OCR 라벨 보강) ────────────
 
-  defp by_similarity(project, assets, reference_kind, hash_field) do
-    scenes = target_scenes(project, "info")
+  defp by_similarity(project, assets, reference_kind, hash_field, only) do
+    scenes = target_scenes(project, "info", only)
     reference = reference_by_scene(project, reference_kind)
 
     if map_size(reference) == 0 do
       # 기준이 될 CLEAN 이 아직 없다 — 순서로 떨어뜨린다
-      by_order(project, "info", assets)
+      by_order(project, "info", assets, only)
     else
       ocr_texts = maybe_ocr(assets)
 
@@ -91,8 +96,8 @@ defmodule VideoTool.Mapping do
 
   # ── 클립 — 첫 프레임=CLEAN, 마지막 프레임=INFO 체인 ─────────────
 
-  defp by_chain(project, assets) do
-    scenes = target_scenes(project, "clip")
+  defp by_chain(project, assets, only) do
+    scenes = target_scenes(project, "clip", only)
     cleans = reference_by_scene(project, "clean")
     infos = reference_by_scene(project, "info")
 
@@ -159,14 +164,22 @@ defmodule VideoTool.Mapping do
   # 안 빼면 3·5·7 번만 새로 뽑아도 결과가 1·2·3 번에 붙는다 — 배정이 파일 순서를 그대로
   # 1번 장면부터 깔기 때문이다. 71·72 편에서 매번 눈으로 확인하고 SQL 로 되돌렸던 자리다.
   # 비어 있는 장면이 하나도 없으면 "전부 다시 뽑는다" 로 읽는다 (Mcp.wanted_scenes 와 같은 규칙).
-  defp target_scenes(project, kind) do
+  defp target_scenes(project, kind, only) do
+    all = Projects.scenes(project.id)
+
+    case only && Enum.filter(all, &(&1.scene_no in only)) do
+      [_ | _] = requested -> requested
+      _ -> open_scenes(project, kind, all)
+    end
+  end
+
+  # 요청 목록을 모를 때(수동 회수 등) 쓰는 차선책.
+  defp open_scenes(project, kind, all) do
     taken =
       project.id
       |> Media.list_assets(kind)
       |> Enum.filter(&(&1.scene_id && &1.status != "rejected"))
       |> MapSet.new(& &1.scene_id)
-
-    all = Projects.scenes(project.id)
 
     case Enum.reject(all, &MapSet.member?(taken, &1.id)) do
       [] -> all

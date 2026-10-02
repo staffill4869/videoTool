@@ -1,5 +1,39 @@
 import Config
 
+# ── .env ────────────────────────────────────────────────────────
+#
+# 자격증명을 시스템 환경변수에 넣게 하면 셸을 다시 열어야 하고, 무엇이 설정됐는지도 안 보인다.
+# 프로젝트 폴더의 `.env` 를 읽는다. 이미 있는 환경변수는 덮어쓰지 않는다 (배포 환경이 이긴다).
+# `.env` 는 .gitignore 에 있다.
+#
+# **맨 위에 있어야 한다.** 아래 설정들이 System.get_env 로 이 값을 읽는데,
+# .env 를 나중에 읽으면 그때는 아직 비어 있어서 조용히 기본값이 쓰인다
+# (DAILY_PUBLISH_CAP 을 6 으로 바꿔도 3 으로 돌던 이유였다 — systemd 가
+#  환경변수를 직접 넣어 줘서 서버에서만 우연히 맞았다).
+env_file = Path.join(File.cwd!(), ".env")
+
+if File.exists?(env_file) do
+  env_file
+  |> File.read!()
+  |> String.split(~r/\r?\n/)
+  |> Enum.each(fn line ->
+    line = String.trim(line)
+
+    unless line == "" or String.starts_with?(line, "#") do
+      case String.split(line, "=", parts: 2) do
+        [key, value] ->
+          key = String.trim(key)
+          value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
+          if System.get_env(key) in [nil, ""], do: System.put_env(key, value)
+
+        _ ->
+          :ok
+      end
+    end
+  end)
+end
+
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
@@ -22,6 +56,25 @@ end
 
 config :video_tool, VideoToolWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4300"))]
+
+# 구글 OAuth 콜백 주소. 기본값은 `http://localhost:4300/oauth/google/callback` 이다.
+#
+# 서버(EC2)에서는 4300 을 밖으로 열지 않으므로 그 주소로는 콜백이 못 온다.
+# SSH 터널을 로컬 4301 → 서버 4300 으로 잡고 여기를 4301 로 바꾸면 된다.
+# **GCP 를 안 건드려도 된다** — 데스크톱 앱 클라이언트는 loopback(localhost/127.0.0.1)
+# 주소에 한해 포트를 따지지 않는다.
+if uri = System.get_env("GOOGLE_REDIRECT_URI") do
+  config :video_tool, :google_redirect_uri, uri
+end
+
+# 한 채널에 하루 몇 편까지 올릴지. 무인 루프가 폭주해 한 채널에 8편을 올린 적이 있다
+# (2026-09-23). 0 으로 두면 상한 없음 — 권하지 않는다.
+if cap = System.get_env("DAILY_PUBLISH_CAP") do
+  case Integer.parse(cap) do
+    {n, ""} when n >= 0 -> config :video_tool, :daily_publish_cap, n
+    _ -> raise "DAILY_PUBLISH_CAP 은 0 이상의 정수여야 합니다: #{cap}"
+  end
+end
 
 if config_env() == :dev do
   # Reload browser tabs when matching files change.
@@ -136,34 +189,6 @@ if config_env() == :prod do
   # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
 end
 
-# ── .env ────────────────────────────────────────────────────────
-#
-# 자격증명을 시스템 환경변수에 넣게 하면 셸을 다시 열어야 하고, 무엇이 설정됐는지도 안 보인다.
-# 프로젝트 폴더의 `.env` 를 읽는다. 이미 있는 환경변수는 덮어쓰지 않는다 (배포 환경이 이긴다).
-# `.env` 는 .gitignore 에 있다.
-env_file = Path.join(File.cwd!(), ".env")
-
-if File.exists?(env_file) do
-  env_file
-  |> File.read!()
-  |> String.split(~r/\r?\n/)
-  |> Enum.each(fn line ->
-    line = String.trim(line)
-
-    unless line == "" or String.starts_with?(line, "#") do
-      case String.split(line, "=", parts: 2) do
-        [key, value] ->
-          key = String.trim(key)
-          value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
-          if System.get_env(key) in [nil, ""], do: System.put_env(key, value)
-
-        _ ->
-          :ok
-      end
-    end
-  end)
-end
-
 # ── 구글 자격 ───────────────────────────────────────────────────
 #
 # 용도마다 필요한 게 다르다.
@@ -174,6 +199,10 @@ end
 # 힉스필드 키는 없다 — 나레이션은 에이전트가 힉스필드 MCP 로 만들어 넘겨준다.
 #
 # 없으면 해당 기능만 꺼진다 — 앱은 그대로 돈다.
+# 기업마당 지원사업 공고 (`VideoTool.Grants`). 공고를 영상 주제로 쓸 때만 필요하다.
+# 받는 곳: bizinfo.go.kr → 마이페이지 → API 인증키 발급 (무료)
+config :video_tool, :bizinfo_api_key, System.get_env("BIZINFO_API_KEY")
+
 config :video_tool,
   google_api_key: System.get_env("GOOGLE_API_KEY"),
   google_client_id: System.get_env("GOOGLE_CLIENT_ID"),
