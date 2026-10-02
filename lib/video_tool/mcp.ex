@@ -240,7 +240,7 @@ defmodule VideoTool.MCP do
         "단계 결과를 검증하고 기록한다. publish 는 stage: \"final\" 이 통과돼 있어야 진행된다",
         %{
           "project_id" => int("프로젝트 id"),
-          "stage" => str("clean | info | clips | final")
+          "stage" => str("seed | clean | info | clips | final. seed 는 Flow 를 돌리기 전 시딩 누락을 본다")
         },
         ["project_id", "stage"]
       ),
@@ -1418,7 +1418,7 @@ defmodule VideoTool.MCP do
   defp handle("validate", args) do
     stage = args["stage"] || "final"
 
-    if stage in ~w(clean info clips final) do
+    if stage in ~w(seed clean info clips final) do
       with {:ok, project} <- Projects.get_project(args["project_id"]),
            {:ok, result} <- VideoTool.Validation.run(project, stage) do
         result |> Map.put(:ok, true) |> Map.put(:stage, stage)
@@ -1426,7 +1426,7 @@ defmodule VideoTool.MCP do
         {:error, reason} -> %{ok: false, error: inspect_error(reason)}
       end
     else
-      %{ok: false, error: "stage 는 clean | info | clips | final 중 하나여야 합니다"}
+      %{ok: false, error: "stage 는 seed | clean | info | clips | final 중 하나여야 합니다"}
     end
   end
 

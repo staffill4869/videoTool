@@ -73,7 +73,7 @@ defmodule VideoTool.Jobs.Validation do
 
   alias VideoTool.Projects.Project
 
-  @stages ~w(clean info clips final)
+  @stages ~w(seed clean info clips final)
 
   schema "validations" do
     field :stage, :string

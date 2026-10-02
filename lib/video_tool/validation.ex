@@ -23,6 +23,47 @@ defmodule VideoTool.Validation do
     {:ok, result}
   end
 
+  # ── SEED ────────────────────────────────────────────────────────
+  #
+  # Flow 를 한 번이라도 돌리기 **전에** 본다. 일괄 시딩으로 20편을 넣었더니
+  # 같은 날 세 번 터졌다 (실측 2026-10-02):
+  #   segment_text 없음 → 나레이션이 "1번 장면에 대본 구간이 없습니다" 로 실패
+  #   series_id 없음    → 도입·마무리가 조용히 안 붙음 (아무도 모름)
+  #   info_instruction 없음 → 그림 모델에 제약이 없어 영어 글자가 박히고 배경이 빔
+  # 셋 다 **크레딧을 다 쓴 뒤에야** 드러났다. 여기서 먼저 걸러 낸다.
+  defp check(project, "seed") do
+    scenes = Projects.scenes(project.id)
+    script = Projects.active_script(project.id)
+    segs = Projects.segments_by_scene(script && script.id)
+
+    blank? = fn v -> is_nil(v) or String.trim(to_string(v)) == "" end
+
+    missing = fn label, fun ->
+      case Enum.filter(scenes, fun) do
+        [] -> []
+        bad -> [%{scene_no: nil, issue: "#{label} 없는 장면: #{Enum.map_join(bad, ", ", & &1.scene_no)}"}]
+      end
+    end
+
+    series = if is_nil(project.series_id), do: [%{scene_no: nil, issue: "series_id 가 없다 — 도입·마무리가 안 붙는다"}], else: []
+    text = missing.("대본 구간", &blank?.(Map.get(segs, &1.id)))
+    info = missing.("그림 지시(info_instruction)", &blank?.(&1.info_instruction))
+    shot = missing.("장면 지시(shot_prompt)", &blank?.(&1.shot_prompt))
+    none = if scenes == [], do: [%{scene_no: nil, issue: "장면이 하나도 없다"}], else: []
+
+    finish(
+      %{
+        "has_scenes" => none == [],
+        "has_series" => series == [],
+        "has_segment_text" => text == [],
+        "has_info_instruction" => info == [],
+        "has_shot_prompt" => shot == []
+      },
+      none ++ series ++ text ++ info ++ shot,
+      []
+    )
+  end
+
   # ── CLEAN ───────────────────────────────────────────────────────
 
   defp check(project, "clean") do
