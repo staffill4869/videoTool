@@ -1,0 +1,10 @@
+[Unit]
+Description=videoCRM 발행기 (대기열에 적힌 것만, 하루 상한 안에서)
+After=videocrm.service
+Wants=videocrm.service
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/videoCRM
+ExecStart=/home/ec2-user/bin/videocrm-publisher.sh

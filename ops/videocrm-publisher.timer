@@ -1,0 +1,10 @@
+[Unit]
+Description=videoCRM 발행기를 매시 5분에 돌린다
+
+[Timer]
+# 하루 상한은 UTC 자정에 풀린다. 매시 돌면 풀린 지 한 시간 안에 올라간다.
+OnCalendar=*-*-* *:05:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
