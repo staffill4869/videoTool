@@ -104,12 +104,27 @@ defmodule VideoTool.Presets.Voice do
     |> cast(attrs, @fields)
     |> validate_required([:voice_id, :display_name, :slug])
     |> validate_number(:chars_per_sec, greater_than: 0)
-    |> validate_number(:speech_rate,
-      greater_than_or_equal_to: @rate_min,
-      less_than_or_equal_to: @rate_max,
-      message: "낭독 속도는 #{@rate_min}~#{@rate_max} 안에서만 조절합니다. 길이가 안 맞으면 대본을 고치세요"
-    )
+    |> validate_speech_rate()
     |> unique_constraint(:slug)
+  end
+
+  # **이 칸은 배속이다.** 0 이면 손대지 않고, 그 외에는 0.8~1.5 배.
+  # `VideoTool.Assembly.speech_rate/1` 이 그렇게 읽는다 (atempo 에 그대로 넘긴다).
+  #
+  # 예전 검증은 -0.2~0.1 "증감폭" 으로 막고 있었다. 같은 칸을 저장할 때와 쓸 때
+  # 다른 뜻으로 읽은 것이다 — 0.1 을 넣으면 assembly 가 max(0.1, 0.8) 로 올려
+  # **오히려 0.8 배로 느려진다.** 실제로 유니(1.12)는 검증을 통과할 수 없는 값이었다.
+  #
+  # 길이를 맞추려고 여기를 건드리지 않는다는 규칙은 그대로다 — 길이는 대본으로 맞춘다.
+  # 여기는 "이 목소리의 기본 말 빠르기" 를 정하는 자리다.
+  defp validate_speech_rate(changeset) do
+    validate_change(changeset, :speech_rate, fn :speech_rate, rate ->
+      cond do
+        rate == 0.0 -> []
+        rate >= 0.8 and rate <= 1.5 -> []
+        true -> [speech_rate: "배속은 0(손대지 않음) 또는 0.8~1.5 입니다. 길이가 안 맞으면 대본을 고치세요"]
+      end
+    end)
   end
 end
 
