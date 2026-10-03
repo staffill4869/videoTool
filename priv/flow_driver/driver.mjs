@@ -876,29 +876,40 @@ async function approveIfAsked(page, cfg) {
   // 같은 글자가 화면 여러 곳에 있으므로(우리가 보낸 답장까지) 반드시
   // **에이전트 말풍선 안에서, 아직 쓰이지 않은(dimmed 아닌) 것, 가장 마지막 것**을 누른다.
   for (const want of ["항상 승인", "승인", "Always allow", "Always approve", "Approve", "Allow"]) {
-    const clicked = await page
+    // **element.click() 으로는 안 눌린다.** Flow 는 신뢰된 입력만 받는다 —
+    // 합성 클릭은 조용히 무시된다. 그래서 2026-10-03 밤에 영상 생성이 통째로 멈췄다:
+    // 승인창이 뜬 채로 18번을 돌려 클립 0개를 받았고, 크레딧이 안 드는 그림만 계속 됐다.
+    // 자리만 여기서 재고, 누르는 건 page.mouse 로 한다 (진짜 입력 이벤트).
+    const box = await page
       .evaluate((label) => {
-        const opts = [...document.querySelectorAll(".agent-bubble .option-label")].filter(
-          (e) => (e.textContent || "").trim() === label
+        // 섀도 DOM 까지 뒤진다. 클래스 이름은 Flow 가 바꿔도 글자는 안 바뀐다.
+        const all = [];
+        const walk = (root) =>
+          root.querySelectorAll("*").forEach((el) => {
+            all.push(el);
+            if (el.shadowRoot) walk(el.shadowRoot);
+          });
+        walk(document);
+
+        const opts = all.filter(
+          (e) =>
+            e.children.length === 0 &&
+            (e.textContent || "").replace(/\s+/g, " ").trim() === label
         );
         const live = opts.filter((e) => !e.classList.contains("dimmed"));
         const target = (live.length ? live : opts).pop();
-        if (!target) return false;
+        if (!target) return null;
 
-        // 실제로 눌리는 건 가까운 조상일 수 있다. 위로 올라가며 눌러 본다.
-        let n = target;
-        for (let d = 0; d < 4 && n; d++) {
-          if (n.getBoundingClientRect().width > 0) {
-            n.click();
-            return true;
-          }
-          n = n.parentElement;
-        }
-        return false;
+        const r = target.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return null;
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       }, want)
-      .catch(() => false);
+      .catch(() => null);
 
-    if (clicked) return true;
+    if (box) {
+      await page.mouse.click(box.x, box.y).catch(() => {});
+      return true;
+    }
   }
 
   // 예전 방식도 남겨 둔다 — UI 가 버튼으로 돌아갈 수 있다.

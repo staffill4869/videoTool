@@ -60,21 +60,39 @@ defmodule VideoTool.Assembly do
         measured_chars_per_sec: cps
       }
 
-      with {:ok, narration} <- Media.create_narration(attrs) do
-        rows = subtitle_rows(segments, timing, silences, duration)
-        {:ok, _} = Media.replace_subtitles(narration, rows)
-        {:ok, _} = Projects.sync_status(project.id)
+      # **모든 대본 줄에 시간이 잡혔는지 먼저 본다.**
+      #
+      # timing 은 클립 길이에서 나온다. 클립이 모자란 채로 나레이션을 돌리면 칸이 덜 생기고,
+      # 시간을 못 받은 대본은 자막에서 조용히 사라진다. 161 번이 그랬다 — 클립이 4개뿐일 때
+      # 나레이션이 돌아 9줄 중 3줄만 자막이 깔렸고, 음성은 "여러분 미쳤습니다" 로 시작하는데
+      # 자막은 처음부터 여섯째 줄이 떠 있었다. 그대로 유튜브에 나갔다 (2026-10-03).
+      #
+      # 조용히 반쪽을 만드느니 여기서 멈춘다. 워커는 나레이션 실패를 보고 그 편을 건너뛴다.
+      timed = MapSet.new(timing, & &1["scene_id"])
+      untimed = Enum.reject(segments, &MapSet.member?(timed, &1.scene_id))
 
-        {:ok,
-         %{
-           narration_id: narration.id,
-           duration_sec: duration,
-           silence_count: length(silences),
-           scenes: length(timing),
-           subtitles: length(rows),
-           measured_chars_per_sec: cps,
-           file_path: path
-         }}
+      if untimed != [] do
+        {:error,
+         "대본 #{length(segments)}줄 중 #{length(untimed)}줄에 시간이 안 잡혔습니다 " <>
+           "(클립이 모자랍니다). 클립을 다 만든 뒤 나레이션을 돌리세요 — " <>
+           "이대로 가면 그 줄들은 자막 없이 나갑니다."}
+      else
+        with {:ok, narration} <- Media.create_narration(attrs) do
+          rows = subtitle_rows(segments, timing, silences, duration)
+          {:ok, _} = Media.replace_subtitles(narration, rows)
+          {:ok, _} = Projects.sync_status(project.id)
+
+          {:ok,
+           %{
+             narration_id: narration.id,
+             duration_sec: duration,
+             silence_count: length(silences),
+             scenes: length(timing),
+             subtitles: length(rows),
+             measured_chars_per_sec: cps,
+             file_path: path
+           }}
+        end
       end
     end
   end
