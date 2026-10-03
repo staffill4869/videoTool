@@ -900,11 +900,24 @@ async function approveIfAsked(page, cfg) {
         const target = (live.length ? live : opts).pop();
         if (!target) return null;
 
+        // **화면 안으로 끌어온 뒤에 자리를 재야 한다.**
+        // 대화가 길어지면 승인 줄이 스크롤 위로 밀려 y 가 -23665 까지 간다 (실측 2026-10-03).
+        // 그 좌표로 누르면 허공을 때리고, 승인창은 그대로 남아 영상이 한 개도 안 나온다.
+        target.scrollIntoView({ block: "center", inline: "center" });
         const r = target.getBoundingClientRect();
         if (r.width <= 0 || r.height <= 0) return null;
+        if (r.top < 0 || r.left < 0 || r.bottom > window.innerHeight || r.right > window.innerWidth) {
+          return { retry: true };
+        }
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       }, want)
       .catch(() => null);
+
+    // 스크롤이 아직 안 끝났으면 한 박자 쉬고 다시 잰다.
+    if (box && box.retry) {
+      await page.waitForTimeout(600);
+      continue;
+    }
 
     if (box) {
       await page.mouse.click(box.x, box.y).catch(() => {});
