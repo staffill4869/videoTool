@@ -86,3 +86,11 @@ lines*.json
 bgm/*.mp3
 ops/published.log
 ops/.publisher.lock
+
+# 자격증명. .env.example 을 복사해서 쓴다.
+# **.env 로 시작하는 것은 전부 뺀다.** `/.env` 만 적어 뒀더니 `.env.bak` 과
+# `.env.bak-20260930` 이 `git add -A` 에 쓸려 들어가 구글 OAuth 비밀이 커밋됐다
+# (2026-10-04, GitHub push protection 이 막아서 발견).
+.env
+.env.*
+!.env.example
