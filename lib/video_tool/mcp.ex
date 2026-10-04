@@ -246,6 +246,14 @@ defmodule VideoTool.MCP do
         ["project_id"]
       ),
       tool(
+        "scene_gaps",
+        "이 편에서 아직 자산이 없는 장면 번호를 단계별로 돌려준다. " <>
+          "워커가 단계를 고를 때 쓴다 — 예전에는 `mix run` 으로 앱을 새로 띄워 물었는데, " <>
+          "그게 편마다 네다섯 번씩이라 2코어 서버를 멈춰 세웠다 (2026-10-04)",
+        %{"project_id" => int("프로젝트 id")},
+        ["project_id"]
+      ),
+      tool(
         "validate",
         "단계 결과를 검증하고 기록한다. publish 는 stage: \"final\" 이 통과돼 있어야 진행된다",
         %{
@@ -1420,6 +1428,35 @@ defmodule VideoTool.MCP do
         {:ok, result} -> Map.put(result, :ok, true)
         {:error, reason} -> %{ok: false, error: inspect_error(reason)}
       end
+    else
+      {:error, reason} -> %{ok: false, error: inspect_error(reason)}
+    end
+  end
+
+  defp handle("scene_gaps", args) do
+    with {:ok, project} <- Projects.get_project(args["project_id"]) do
+      scenes = Projects.scenes(project.id)
+
+      gap = fn kind ->
+        have =
+          project.id
+          |> Media.list_assets(kind)
+          |> Enum.reject(&(&1.status == "rejected"))
+          |> MapSet.new(& &1.scene_id)
+
+        scenes
+        |> Enum.reject(&MapSet.member?(have, &1.id))
+        |> Enum.map(& &1.scene_no)
+      end
+
+      %{
+        ok: true,
+        project_id: project.id,
+        scenes: Enum.map(scenes, & &1.scene_no),
+        clean: gap.("clean"),
+        info: gap.("info"),
+        clip: gap.("clip")
+      }
     else
       {:error, reason} -> %{ok: false, error: inspect_error(reason)}
     end
